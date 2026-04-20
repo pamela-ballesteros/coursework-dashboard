@@ -93,4 +93,4 @@ coursework-dashboard/
 
 ---
 
-_Last updated: [month year]_
+

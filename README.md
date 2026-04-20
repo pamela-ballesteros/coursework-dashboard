@@ -21,8 +21,7 @@ This repo is my personal knowledge dashboard: a structured archive of everything
 | 03 | **MBAN-5540** - Prescriptive and Optimzation Analytics |Winter 2026 | Optimization-focused coursework with lectures and applied notebooks for mathematical modeling, LP solutions and sensitivity analysis, duality, integer programming, network models, supply-chain design, decision analysis, Monte Carlo simulation, dynamic programming, and Markov models. | [→](./courses/03-course-slug/) |
 | 04 |**MBAN 5510** - Agentic AI | Winter 2026| Course materials focused on practical agentic AI systems: LLM foundations, AI agents, LangChain, middleware, LangGraph, advanced graph workflows, deep agents, Selenium testing, and applied test-case design. | [→](./courses/04-course-slug/) |
 | 05 |**MBAN 5550** - Enterprise Data Management | Fall 2025 | Enterprise data management coursework covering data management foundations, database modeling, SQL project work, reporting, Power BI, Tableau, and applied business intelligence deliverables. | [→](./courses/05-course-slug/) |
-| 06 | _Course name_ | _Term, Year_ | _1-line focus_ | [→](./courses/06-course-slug/) |
-| 07 | _Course name_ | _Term, Year_ | _1-line focus_ | [→](./courses/07-course-slug/) |
+
 
 _Table updates as courses are added._
 

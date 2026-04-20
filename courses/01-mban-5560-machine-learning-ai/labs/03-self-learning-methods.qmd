@@ -1,0 +1,995 @@
+---
+title: "Self-Learning Methods"
+subtitle: "Hyperparameter Tuning with Cross-Validation & Bootstrapping"
+author: "MBAN 5560 - Machine Learning & AI - Winter 2026"
+date: today
+format:
+  html:
+    embed-resources: true
+    code-background: true
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+```
+
+In this lecture, we explore **self-learning methods** - techniques that allow machine learning algorithms to automatically tune their hyperparameters using the data itself. These methods are fundamental to building effective predictive models because they help us find the optimal balance between underfitting and overfitting.
+
+**Learning Objectives:**
+
+1. Understand why we cannot use training error to select hyperparameters
+2. Master k-fold cross-validation for hyperparameter tuning
+3. Learn progressive improvements to cross-validation procedures
+4. Understand bootstrapping and out-of-bag (OOB) validation
+5. Compare cross-validation and bootstrap approaches
+
+# The Hyperparameter Tuning Problem
+
+## Why Training Error Fails
+
+Recall from last week that as we increase model flexibility (e.g., by lowering the `span` in LOESS or increasing polynomial degree), training error **always decreases**. However, this doesn't mean the model will predict well on new data.
+
+The fundamental problem:
+
+- **Training error** measures how well the model fits the data it has already seen
+- **Prediction error** measures how well the model predicts data it has never seen
+- Training error is always **optimistic** - it underestimates true prediction error
+
+## What are Hyperparameters?
+
+**Hyperparameters** are settings that control the learning algorithm but are NOT learned from the data:
+
+| Model | Hyperparameters |
+|-------|-----------------|
+| LOESS | `span`, `degree` |
+| Polynomial Regression | Degree of polynomial |
+| k-NN | Number of neighbors (k) |
+| Ridge/Lasso | Regularization parameter (λ) |
+| Random Forest | Number of trees, max depth |
+
+These must be chosen **before** fitting the model. The question is: how do we choose them?
+
+## The Self-Learning Approach
+
+The key insight is to **simulate** the out-of-sample prediction process using only our training data:
+
+1. **Hold out** some data (don't use it for training)
+2. **Train** the model on the remaining data
+3. **Evaluate** on the held-out data
+4. **Repeat** with different hold-out sets
+5. **Select** the hyperparameter that gives the best average performance
+
+This is the essence of cross-validation and bootstrapping.
+
+# Simulated Data for Examples
+
+Throughout this lecture, we'll use simulated data where we **know** the true relationship:
+
+```{r simulate-data}
+n <- 1000
+set.seed(1)
+x <- sort(runif(n) * 2 * pi)
+y <- sin(x) + rnorm(n) / 4
+data <- data.frame(y = y, x = x)
+```
+
+```{r plot-data, echo=FALSE}
+ggplot(data, aes(x = x, y = y)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  geom_line(aes(y = sin(x)), color = "red", size = 1.2, linetype = "dashed") +
+  labs(
+    title = "Simulated Data: y = sin(x) + noise",
+    subtitle = "Red dashed line shows the true relationship",
+    x = "X",
+    y = "Y"
+  ) +
+  theme_minimal()
+```
+
+# Cross-Validation Fundamentals
+
+## The Basic Idea: k-Fold Cross-Validation
+
+In **k-fold cross-validation**, we:
+
+1. Randomly shuffle the data
+2. Split the data into k equal-sized "folds"
+3. For each fold i = 1, 2, ..., k:
+   - Use fold i as the **validation set**
+   - Use the remaining k-1 folds as the **training set**
+   - Train the model and compute prediction error on fold i
+4. Average the k prediction errors to get the **cross-validation error**
+
+The most common choice is **k = 10** (10-fold CV).
+
+## Creating Folds with `cut()`
+
+R's `cut()` function is useful for creating fold assignments:
+
+```{r cut-demo}
+# Example: Create 10 folds from 100 observations
+groups <- cut(1:100, breaks = 10, labels = FALSE)
+print(groups)
+```
+
+Each number indicates which fold that observation belongs to. Notice the folds are **sequential** - we need to shuffle first!
+
+```{r cut-shuffle}
+# Shuffle to get random assignment
+set.seed(123)
+groups <- sample(cut(1:100, breaks = 10, labels = FALSE))
+print(groups)
+table(groups)
+```
+
+Now observations are randomly assigned to folds, with each fold having approximately equal size.
+
+## Handling Unequal Fold Sizes
+
+What if n is not evenly divisible by k?
+
+```{r unequal-folds}
+n_unequal <- 9941  # Not evenly divisible by 10
+k <- 10
+folds <- cut(seq(1, n_unequal), breaks = k, labels = FALSE)
+table(folds)
+```
+
+The `cut()` function automatically handles this by making some folds slightly larger than others.
+
+## Basic k-Fold CV Loop
+
+Here's a complete 10-fold CV implementation using a for loop:
+
+```{r basic-cv-loop}
+# Prepare data
+k <- 10
+set.seed(123) 
+data_shuffled <- data[sample(nrow(data)), ]  # Shuffle rows
+folds <- cut(seq(1, nrow(data)), breaks = k, labels = FALSE)
+
+# Initialize MSPE vector
+mspe <- numeric(k)
+
+# CV loop
+for (i in 1:k) {
+  # Identify test indices for this fold
+  testIndexes <- which(folds == i, arr.ind = TRUE)
+  
+  # Split data
+  test <- data_shuffled[testIndexes, ]
+  train <- data_shuffled[-testIndexes, ]
+  
+  # Fit model (using polynomial regression as example)
+  model <- lm(y ~ poly(x, 4), data = train)
+  
+  # Predict and calculate error
+  predictions <- predict(model, test)
+  mspe[i] <- mean((test$y - predictions)^2)
+}
+
+# Results
+cat("MSPE for each fold:\n")
+print(round(mspe, 4))
+cat("\nMean CV MSPE:", round(mean(mspe), 4), "\n")
+cat("SD of CV MSPE:", round(sd(mspe), 4), "\n")
+```
+
+## Alternative: Using `sapply`
+
+The same can be written more concisely with `sapply`:
+
+```{r cv-sapply}
+mspe_sapply <- sapply(1:k, function(i) {
+  testIndexes <- which(folds == i, arr.ind = TRUE)
+  test <- data_shuffled[testIndexes, ]
+  train <- data_shuffled[-testIndexes, ]
+  model <- lm(y ~ poly(x, 4), data = train)
+  predictions <- predict(model, test)
+  mean((test$y - predictions)^2)
+})
+
+cat("Results are identical:", all.equal(mspe, mspe_sapply), "\n")
+```
+
+## Alternative: Using `lapply`
+
+Or with `lapply` (useful when returning more complex objects):
+
+```{r cv-lapply}
+mspe_lapply <- unlist(lapply(1:k, function(i) {
+  testIndexes <- which(folds == i, arr.ind = TRUE)
+  test <- data_shuffled[testIndexes, ]
+  train <- data_shuffled[-testIndexes, ]
+  model <- lm(y ~ poly(x, 4), data = train)
+  predictions <- predict(model, test)
+  mean((test$y - predictions)^2)
+}))
+
+cat("Results are identical:", all.equal(mspe, mspe_lapply), "\n")
+```
+
+## Manual Index Calculation
+
+For complete control, you can calculate indices manually:
+
+```{r cv-manual}
+nvalidate <- round(nrow(data) / k)
+set.seed(123)
+mysample <- sample(nrow(data))  # Shuffled indices
+mspe_manual <- c()
+
+for (i in 1:k) {
+  # Calculate validation indices
+  if (i < k) {
+    ind_val <- mysample[((i - 1) * nvalidate + 1):(i * nvalidate)]
+  } else {
+    # Last fold gets remaining observations
+    ind_val <- mysample[((i - 1) * nvalidate + 1):nrow(data)]
+  }
+  
+  val <- data[ind_val, ]
+  train <- data[-ind_val, ]
+  
+  model <- lm(y ~ poly(x, 4), data = train)
+  predictions <- predict(model, val)
+  mspe_manual[i] <- mean((val$y - predictions)^2)
+}
+
+cat("Mean CV MSPE (manual):", round(mean(mspe_manual), 4), "\n")
+```
+
+# Grid Search for Hyperparameter Tuning
+
+Now that we understand the mechanics of cross-validation, let's apply it to **hyperparameter tuning**. We'll use LOESS as our example, which has two hyperparameters:
+
+- **`span`**: Controls the proportion of data used in each local regression (smaller = more flexible)
+- **`degree`**: The degree of the local polynomial (1 = linear, 2 = quadratic)
+
+## Approach 1: Simple Train-Test Split
+
+The simplest approach is to:
+
+1. Split data into training (80%) and test (20%)
+2. Create a **grid** of hyperparameter combinations
+3. For each combination, fit on training data and evaluate on test data
+4. Select the combination with lowest test error
+
+```{r grid-search-simple}
+# Create hyperparameter grid
+grid <- expand.grid(
+  span = seq(from = 0.01, to = 1, by = 0.02),
+  degree = c(1, 2)
+)
+
+cat("Grid has", nrow(grid), "hyperparameter combinations\n")
+head(grid)
+```
+
+```{r train-test-split}
+# Single train-test split
+set.seed(42)
+ind <- sample(nrow(data), 0.80 * nrow(data), replace = FALSE)
+train <- data[ind, ]
+test <- data[-ind, ]
+
+cat("Training set:", nrow(train), "observations\n")
+cat("Test set:", nrow(test), "observations\n")
+```
+
+```{r grid-search-loop}
+# Grid search
+RMSPE <- numeric(nrow(grid))
+
+for (s in 1:nrow(grid)) {
+  model <- loess(
+    y ~ x,
+    control = loess.control(surface = "direct"),
+    degree = grid[s, "degree"],
+    span = grid[s, "span"],
+    data = train
+  )
+  
+  predictions <- predict(model, test$x)
+  RMSPE[s] <- sqrt(mean((test$y - predictions)^2))
+}
+
+# Best hyperparameters
+best_idx <- which.min(RMSPE)
+cat("\nBest hyperparameters:\n")
+cat("Span:", grid[best_idx, "span"], "\n")
+cat("Degree:", grid[best_idx, "degree"], "\n")
+cat("RMSPE:", round(RMSPE[best_idx], 4), "\n")
+```
+
+```{r plot-grid-search, echo=FALSE}
+results <- cbind(grid, RMSPE)
+ggplot(results, aes(x = span, y = RMSPE, color = factor(degree))) +
+  geom_line(size = 1) +
+  geom_point(data = results[best_idx, ], aes(x = span, y = RMSPE), 
+             color = "red", size = 4, shape = 17) +
+  labs(
+    title = "Grid Search Results: Simple Train-Test Split",
+    subtitle = "Red triangle marks the optimal hyperparameters",
+    x = "Span",
+    y = "RMSPE",
+    color = "Degree"
+  ) +
+  theme_minimal()
+```
+
+## Problem: Instability of Single Split
+
+The problem with a single train-test split is **instability**. Different random splits can give different "optimal" hyperparameters!
+
+```{r instability-demo}
+# Run grid search with different random splits
+optimal_spans <- numeric(5)
+optimal_degrees <- numeric(5)
+
+for (run in 1:5) {
+  set.seed(run * 10)  # Different seed each time
+  ind <- sample(nrow(data), 0.80 * nrow(data), replace = FALSE)
+  train <- data[ind, ]
+  test <- data[-ind, ]
+  
+  RMSPE <- numeric(nrow(grid))
+  for (s in 1:nrow(grid)) {
+    model <- loess(
+      y ~ x,
+      control = loess.control(surface = "direct"),
+      degree = grid[s, "degree"],
+      span = grid[s, "span"],
+      data = train
+    )
+    predictions <- predict(model, test$x)
+    RMSPE[s] <- sqrt(mean((test$y - predictions)^2))
+  }
+  
+  best_idx <- which.min(RMSPE)
+  optimal_spans[run] <- grid[best_idx, "span"]
+  optimal_degrees[run] <- grid[best_idx, "degree"]
+}
+
+cat("Optimal span across 5 different splits:\n")
+print(optimal_spans)
+cat("\nOptimal degree across 5 different splits:\n")
+print(optimal_degrees)
+```
+
+The selected hyperparameters vary with the random split! This is why we need **cross-validation**.
+
+## Approach 2: k-Fold CV with Per-Fold Selection
+
+A better approach uses k-fold CV to stabilize hyperparameter selection:
+
+**Procedure:**
+
+1. Split data into training (80%) and test (20%) - test set is **held out** for final evaluation
+2. On the training data, perform k-fold CV:
+   - For each fold, find the best hyperparameter
+   - Collect k "best" hyperparameters
+3. Take the **average** (for continuous) or **mode** (for discrete) of the k best hyperparameters
+4. Train final model with these hyperparameters on ALL training data
+5. Evaluate on the held-out test set
+
+```{r cv-approach2, cache=TRUE}
+# Use smaller grid for demonstration
+grid <- expand.grid(
+  span = seq(from = 0.1, to = 0.9, by = 0.1),
+  degree = c(1, 2)
+)
+
+RMSPE_test <- numeric(5)  # Store final test RMSPE for 5 outer splits
+
+for (l in 1:5) {
+  # Outer split: training vs test
+  set.seed(10 + l)
+  ind <- sample(nrow(data), 0.80 * nrow(data), replace = FALSE)
+  test <- data[-ind, ]
+  modata <- data[ind, ]  # "model data" for tuning
+  
+  # Inner k-fold CV for hyperparameter tuning
+  k <- 10
+  folds <- sample(cut(seq(1, nrow(modata)), breaks = k, labels = FALSE))
+  
+  OPT <- numeric(k)  # Store best grid index for each fold
+  
+  for (i in 1:k) {
+    testIndexes <- which(folds == i, arr.ind = TRUE)
+    val <- modata[testIndexes, ]
+    train <- modata[-testIndexes, ]
+    
+    RMSPE <- numeric(nrow(grid))
+    
+    for (s in 1:nrow(grid)) {
+      model <- loess(
+        y ~ x,
+        control = loess.control(surface = "direct"),
+        degree = grid[s, "degree"],
+        span = grid[s, "span"],
+        data = train
+      )
+      
+      fit <- predict(model, val$x)
+      RMSPE[s] <- sqrt(mean((val$y - fit)^2))
+    }
+    OPT[i] <- which.min(RMSPE)  # Best hyperparameter for this fold
+  }
+  
+  # Get selected hyperparameters from each fold
+  opgrid <- grid[OPT, ]
+  colnames(opgrid) <- c("span", "degree")
+  
+  # Take average span and mode of degree
+  opt_span <- mean(opgrid$span)
+  opt_degree <- as.numeric(names(sort(table(opgrid$degree), decreasing = TRUE)[1]))
+  
+  # Train final model on ALL training data
+  model <- loess(
+    y ~ x,
+    control = loess.control(surface = "direct"),
+    degree = opt_degree,
+    span = opt_span,
+    data = modata
+  )
+  
+  # Evaluate on test set
+  fit <- predict(model, test$x)
+  RMSPE_test[l] <- sqrt(mean((test$y - fit)^2))
+  
+  cat("Outer split", l, ": Selected span =", round(opt_span, 2), 
+      ", degree =", opt_degree, ", Test RMSPE =", round(RMSPE_test[l], 4), "\n")
+}
+
+cat("\nMean Test RMSPE:", round(mean(RMSPE_test), 4), "\n")
+```
+
+## Problem: Per-Fold Selection Can Be Inconsistent
+
+Notice that in Approach 2, we select the **best hyperparameter for each fold separately**, then aggregate them. This has a subtle problem:
+
+- Different folds might select very different hyperparameters
+- The average/mode may not represent any actual good hyperparameter combination
+- We're averaging **indices** or **values** across fundamentally different selection results
+
+**Example**: If 5 folds select span = 0.1, 0.3, 0.5, 0.7, 0.9, the average is 0.5 - but 0.5 might not be optimal at all!
+
+## Approach 3: k-Fold CV with Averaged Error (Recommended)
+
+The **correct** approach is to:
+
+1. For **each** hyperparameter setting, calculate the **average RMSPE across all k folds**
+2. Select the hyperparameter with the **lowest average RMSPE**
+3. This ensures consistent selection based on overall performance, not per-fold performance
+
+**Key Insight:** We average the **errors** first, then select - not select first, then average the selections!
+
+```{r cv-approach3, cache=TRUE}
+grid <- expand.grid(
+  span = seq(from = 0.1, to = 0.9, by = 0.1),
+  degree = c(1, 2)
+)
+
+RMSPE_test <- numeric(5)
+
+for (l in 1:5) {
+  # Outer split: training vs test
+  set.seed(10 + l)
+  ind <- sample(nrow(data), 0.80 * nrow(data), replace = FALSE)
+  test <- data[-ind, ]
+  modata <- data[ind, ]
+  
+  # Store mean RMSPE for each hyperparameter setting
+  merror <- numeric(nrow(grid))
+  
+  for (s in 1:nrow(grid)) {
+    # Inner k-fold CV for THIS hyperparameter setting
+    k <- 10
+    folds <- sample(cut(seq(1, nrow(modata)), breaks = k, labels = FALSE))
+    rmspe <- numeric(k)
+    
+    for (i in 1:k) {
+      testIndexes <- which(folds == i, arr.ind = TRUE)
+      val <- modata[testIndexes, ]
+      train <- modata[-testIndexes, ]
+      
+      model <- loess(
+        y ~ x,
+        control = loess.control(surface = "direct"),
+        degree = grid[s, "degree"],
+        span = grid[s, "span"],
+        data = train
+      )
+      
+      rmspe[i] <- sqrt(mean((val$y - predict(model, val$x))^2))
+    }
+    
+    # Average RMSPE across all folds for this hyperparameter
+    merror[s] <- mean(rmspe)
+  }
+  
+  # Select hyperparameter with lowest AVERAGE error
+  opt_idx <- which.min(merror)
+  opt_degree <- grid[opt_idx, "degree"]
+  opt_span <- grid[opt_idx, "span"]
+  
+  # Train final model on ALL training data
+  model <- loess(
+    y ~ x,
+    control = loess.control(surface = "direct"),
+    degree = opt_degree,
+    span = opt_span,
+    data = modata
+  )
+  
+  # Evaluate on test set
+  fit <- predict(model, test$x)
+  RMSPE_test[l] <- sqrt(mean((test$y - fit)^2))
+  
+  cat("Outer split", l, ": Selected span =", opt_span, 
+      ", degree =", opt_degree, ", Test RMSPE =", round(RMSPE_test[l], 4), "\n")
+}
+
+cat("\nMean Test RMSPE:", round(mean(RMSPE_test), 4), "\n")
+```
+
+## Comparing the Three Approaches
+
+```{r comparison-visual, echo=FALSE, fig.height=5}
+# Visualize the difference between approaches
+comparison_df <- data.frame(
+  Approach = factor(c("1. Single Split", "2. Per-Fold Selection", "3. Averaged Error"),
+                    levels = c("1. Single Split", "2. Per-Fold Selection", "3. Averaged Error")),
+  Description = c(
+    "Single random split\nHigh variance",
+    "Select per fold,\nthen average selections",
+    "Average errors,\nthen select (BEST)"
+  )
+)
+
+kable(data.frame(
+  Approach = c("1. Single Split", "2. Per-Fold Selection", "3. Averaged Error"),
+  Pros = c("Fast, simple", "Uses CV, more stable", "Most reliable selection"),
+  Cons = c("High variance, unstable", "May average incompatible selections", "More computation"),
+  Recommendation = c("Avoid", "Acceptable", "Recommended")
+), caption = "Comparison of Hyperparameter Tuning Approaches") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## The Nested Cross-Validation Structure
+
+The procedure we've been using is called **nested cross-validation**:
+
+- **Outer loop**: Splits data into training and test for **model evaluation**
+- **Inner loop**: Performs k-fold CV on training data for **hyperparameter tuning**
+
+This ensures that:
+
+1. Hyperparameters are tuned on data separate from final evaluation
+2. Test set is truly "unseen" - never used in hyperparameter selection
+3. We get an unbiased estimate of out-of-sample performance
+
+```
+Nested CV Structure:
+├── Outer Loop (L iterations)
+│   ├── Split: Training (80%) vs Test (20%)
+│   ├── Inner Loop (k-fold CV on Training)
+│   │   ├── For each hyperparameter setting:
+│   │   │   ├── For each fold:
+│   │   │   │   ├── Train on k-1 folds
+│   │   │   │   └── Evaluate on held-out fold
+│   │   │   └── Average RMSPE across folds
+│   │   └── Select hyperparameter with lowest avg RMSPE
+│   ├── Train final model on ALL training data with selected hyperparameters
+│   └── Evaluate on Test set
+└── Report: Mean and SD of Test RMSPE across L outer iterations
+```
+
+# Bootstrapping and Out-of-Bag (OOB) Validation
+
+**Bootstrapping** provides an alternative to k-fold CV for hyperparameter tuning. The key idea is to use **sampling with replacement** to create training sets, and use the **out-of-bag (OOB)** observations for validation.
+
+## What is Bootstrapping?
+
+In bootstrapping, we create a new dataset by sampling **with replacement** from the original data:
+
+- Sample n observations from a dataset of size n
+- Some observations will be selected multiple times
+- Some observations won't be selected at all
+
+```{r bootstrap-demo}
+# Original "data" (indices 1-100)
+a <- 1:100
+
+# Bootstrap sample
+set.seed(42)
+b <- sample(a, 100, replace = TRUE)
+
+# How many unique observations were selected?
+b_unique <- unique(b)
+cat("Unique observations in bootstrap sample:", length(b_unique), "\n")
+cat("Percentage of data used:", length(b_unique)/length(b) * 100, "%\n")
+```
+
+## Out-of-Bag (OOB) Observations
+
+The observations NOT selected in a bootstrap sample are called **Out-of-Bag (OOB)**:
+
+```{r oob-demo}
+# OOB observations (those not in the bootstrap sample)
+oob <- setdiff(a, b_unique)
+
+cat("Number of OOB observations:", length(oob), "\n")
+cat("OOB percentage:", length(oob)/length(a) * 100, "%\n")
+```
+
+## The 36.8% Rule
+
+On average, about **36.8%** of observations will be OOB in any bootstrap sample. Why?
+
+The probability that an observation is **not** selected in any single draw is:
+
+$$P(\text{not selected in one draw}) = 1 - \frac{1}{n}$$
+
+After n draws:
+
+$$P(\text{OOB}) = \left(1 - \frac{1}{n}\right)^n$$
+
+As n → ∞:
+
+$$\lim_{n \to \infty} \left(1 - \frac{1}{n}\right)^n = e^{-1} \approx 0.368$$
+
+Let's verify this empirically:
+
+```{r oob-empirical}
+# Run many bootstrap samples and track OOB percentage
+set.seed(123)
+oob_percentages <- numeric(1000)
+
+for (i in 1:1000) {
+  boot_sample <- sample(100, 100, replace = TRUE)
+  oob_percentages[i] <- (100 - length(unique(boot_sample))) / 100
+}
+
+cat("Mean OOB percentage:", round(mean(oob_percentages) * 100, 1), "%\n")
+cat("Theoretical:", round(exp(-1) * 100, 1), "%\n")
+```
+
+## Using OOB for Validation
+
+The OOB observations provide a **natural validation set**:
+
+- Train on the bootstrap sample (observations that were selected)
+- Validate on the OOB observations (those not selected)
+- Repeat many times and average the validation errors
+
+```{r bootstrap-split}
+# Example: Splitting a data frame using bootstrap
+set.seed(123)
+x <- rnorm(100)
+y <- 2*x + rnorm(100)
+df <- data.frame(x, y)
+
+# Bootstrap indices
+ind <- sample(nrow(df), nrow(df), replace = TRUE)
+
+# Training set: bootstrap sample
+train <- df[ind, ]
+cat("Training set size:", nrow(train), "rows\n")
+cat("(Some rows are duplicated)\n")
+
+# Test set: OOB observations
+test <- df[-unique(ind), ]
+cat("\nTest set (OOB) size:", nrow(test), "rows\n")
+cat("OOB percentage:", round(nrow(test)/nrow(df) * 100, 1), "%\n")
+```
+
+**Key insight:** Unlike k-fold CV where we must specify k, bootstrap automatically gives us ~63.2% for training and ~36.8% for validation!
+
+# Bootstrap Cross-Validation for Hyperparameter Tuning
+
+Now let's apply bootstrapping to hyperparameter tuning, as an alternative to k-fold CV.
+
+## Basic Bootstrap CV (Approach 1)
+
+The simplest bootstrap approach:
+
+1. For each hyperparameter setting:
+   - Run B bootstrap iterations
+   - In each iteration, train on bootstrap sample, evaluate on OOB
+   - Average the B RMSPE values
+2. Select hyperparameter with lowest average RMSPE
+
+```{r boot-cv-basic, cache=TRUE}
+# Smaller grid for faster computation
+grid <- expand.grid(
+  span = seq(from = 0.5, to = 0.8, by = 0.05),
+  degree = c(1, 2)
+)
+
+B <- 50  # Number of bootstrap iterations
+
+mean_rmspe <- numeric(nrow(grid))
+
+for (i in 1:nrow(grid)) {
+  rmspe <- numeric(B)
+  
+  for (j in 1:B) {
+    # Bootstrap sample
+    ind <- unique(sample(nrow(data), nrow(data), replace = TRUE))
+    train <- data[ind, ]
+    val <- data[-ind, ]  # OOB observations
+    
+    # Fit model
+    model <- loess(
+      y ~ x,
+      control = loess.control(surface = "direct"),
+      degree = grid[i, "degree"],
+      span = grid[i, "span"],
+      data = train
+    )
+    
+    # Evaluate on OOB
+    yhat <- predict(model, val)
+    rmspe[j] <- sqrt(mean((val$y - yhat)^2))
+  }
+  
+  mean_rmspe[i] <- mean(rmspe)
+}
+
+# Best hyperparameters
+best_idx <- which.min(mean_rmspe)
+cat("Best hyperparameters (Bootstrap CV):\n")
+cat("Span:", grid[best_idx, "span"], "\n")
+cat("Degree:", grid[best_idx, "degree"], "\n")
+cat("Mean RMSPE:", round(mean_rmspe[best_idx], 4), "\n")
+```
+
+```{r boot-cv-plot, echo=FALSE}
+results_boot <- cbind(grid, mean_rmspe)
+ggplot(results_boot, aes(x = span, y = mean_rmspe, color = factor(degree))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_point(data = results_boot[best_idx, ], aes(x = span, y = mean_rmspe),
+             color = "red", size = 4, shape = 17) +
+  labs(
+    title = "Bootstrap CV Results",
+    subtitle = paste("50 bootstrap iterations | Red triangle marks optimal hyperparameters"),
+    x = "Span",
+    y = "Mean RMSPE (across bootstrap samples)",
+    color = "Degree"
+  ) +
+  theme_minimal()
+```
+
+## Complete Bootstrap CV with Test Set (Approach 2)
+
+For proper evaluation, we should use a **nested structure** similar to nested k-fold CV:
+
+- **Outer loop**: Hold out a test set
+- **Inner loop**: Use bootstrap CV for hyperparameter tuning
+- **Final evaluation**: Test set with selected hyperparameters
+
+```{r boot-cv-nested, cache=TRUE}
+grid <- expand.grid(
+  span = seq(from = 0.5, to = 0.8, by = 0.05),
+  degree = c(1, 2)
+)
+
+frmspe <- numeric(8)  # Final RMSPE for each outer iteration
+
+for (t in 1:8) {
+  # Outer split: hold out 20% for testing
+  set.seed(100 + t)
+  testid <- sample(nrow(data), nrow(data) * 0.2)
+  test <- data[testid, ]
+  mdata <- data[-testid, ]  # "model data" for tuning
+  
+  mean_rmspe <- numeric(nrow(grid))
+  
+  for (i in 1:nrow(grid)) {
+    rmspe <- numeric(20)  # 20 bootstrap iterations
+    
+    for (j in 1:20) {
+      # Bootstrap from model data
+      ind <- sample(nrow(mdata), nrow(mdata), replace = TRUE)
+      ind <- unique(ind)
+      
+      train <- mdata[ind, ]
+      val <- mdata[-ind, ]  # OOB
+      
+      model <- loess(
+        y ~ x,
+        control = loess.control(surface = "direct"),
+        degree = grid[i, "degree"],
+        span = grid[i, "span"],
+        data = train
+      )
+      
+      yhat <- predict(model, val)
+      rmspe[j] <- sqrt(mean((val$y - yhat)^2))
+    }
+    mean_rmspe[i] <- mean(rmspe)
+  }
+  
+  # Select best hyperparameters
+  opt <- which.min(mean_rmspe)
+  
+  # Train final model on ALL model data with selected hyperparameters
+  fmodel <- loess(
+    y ~ x,
+    control = loess.control(surface = "direct"),
+    degree = grid[opt, "degree"],
+    span = grid[opt, "span"],
+    data = mdata
+  )
+  
+  # Evaluate on held-out test set
+  yhat <- predict(fmodel, test)
+  frmspe[t] <- sqrt(mean((test$y - yhat)^2))
+  
+  cat("Outer iteration", t, ": span =", grid[opt, "span"], 
+      ", degree =", grid[opt, "degree"], 
+      ", Test RMSPE =", round(frmspe[t], 4), "\n")
+}
+
+cat("\n--- Final Results ---\n")
+cat("Mean Test RMSPE:", round(mean(frmspe), 4), "\n")
+cat("SD Test RMSPE:", round(sd(frmspe), 4), "\n")
+```
+
+## Bootstrap CV Structure
+
+```
+Bootstrap CV with Test Set:
+├── Outer Loop (T iterations)
+│   ├── Split: Model Data (80%) vs Test (20%)
+│   ├── Inner Loop (Bootstrap CV on Model Data)
+│   │   ├── For each hyperparameter setting:
+│   │   │   ├── For j = 1 to B bootstrap iterations:
+│   │   │   │   ├── Sample with replacement → Train set
+│   │   │   │   ├── OOB observations → Validation set
+│   │   │   │   └── Compute RMSPE on validation
+│   │   │   └── Average RMSPE across B iterations
+│   │   └── Select hyperparameter with lowest avg RMSPE
+│   ├── Train final model on ALL model data with selected hyperparameters
+│   └── Evaluate on Test set
+└── Report: Mean and SD of Test RMSPE across T outer iterations
+```
+
+# Comparing k-Fold CV and Bootstrap CV
+
+## Key Differences
+
+```{r comparison-table, echo=FALSE}
+kable(data.frame(
+  Aspect = c(
+    "Validation set size",
+    "Training set size", 
+    "Overlap between iterations",
+    "Number of iterations",
+    "Computation",
+    "Variance of estimate"
+  ),
+  `k-Fold CV` = c(
+    "~10% (for k=10)",
+    "~90% (for k=10)",
+    "None (each obs in exactly 1 fold)",
+    "Fixed at k",
+    "k model fits per hyperparameter",
+    "Lower (more structured)"
+  ),
+  `Bootstrap CV` = c(
+    "~36.8% (OOB)",
+    "~63.2% (unique)",
+    "Varies randomly each iteration",
+    "User choice (B)",
+    "B model fits per hyperparameter",
+    "Higher (more random)"
+  )
+), caption = "k-Fold CV vs Bootstrap CV Comparison") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## When to Use Each Method?
+
+**Use k-Fold CV when:**
+
+- You have limited data (every observation is precious)
+- You want structured, reproducible validation
+- Computational resources are limited
+- You need standard error estimates across folds
+
+**Use Bootstrap CV when:**
+
+- You want to mimic the variability of real data collection
+- You're also interested in uncertainty quantification
+- You have ample computational resources
+- Your data has complex structure that may not partition well
+
+## Practical Recommendations
+
+1. **Start with 10-fold CV** - It's the most commonly used and well-understood method
+
+2. **Use the "average errors, then select" approach** - Never select hyperparameters per-fold then average
+
+3. **Always use a nested structure** - Separate hyperparameter tuning from final evaluation
+
+4. **Report both mean AND standard deviation** of test errors across outer iterations
+
+5. **Consider computational cost** - More bootstrap iterations or more CV folds = better estimates but slower
+
+# Summary and Key Takeaways
+
+## The Big Picture
+
+**Problem**: We need to select hyperparameters, but training error always favors the most complex model.
+
+**Solution**: Use self-learning methods that simulate out-of-sample performance.
+
+## Key Concepts
+
+| Concept | Definition |
+|---------|------------|
+| **Hyperparameter** | A setting that controls learning but is not learned from data |
+| **Cross-Validation** | Rotating which subset is used for validation |
+| **Grid Search** | Systematically trying all hyperparameter combinations |
+| **Bootstrap** | Sampling with replacement |
+| **Out-of-Bag (OOB)** | Observations not selected in a bootstrap sample |
+| **Nested CV** | Using outer loop for evaluation, inner loop for tuning |
+
+## The Correct Procedure
+
+```
+1. Define a grid of hyperparameter values to try
+
+2. For each outer iteration:
+   a. Split data into training and test (e.g., 80/20)
+   b. For each hyperparameter setting:
+      - Use CV or Bootstrap to estimate validation error on training data
+      - Average errors across all folds/iterations
+   c. Select hyperparameter with lowest average validation error
+   d. Train final model on ALL training data with selected hyperparameters
+   e. Evaluate on test set
+   
+3. Report mean and SD of test errors across outer iterations
+```
+
+## Common Mistakes to Avoid
+
+1. ❌ Using training error to select hyperparameters
+2. ❌ Selecting hyperparameters per-fold, then averaging the selections
+3. ❌ Using the test set during hyperparameter tuning
+4. ❌ Not shuffling data before creating folds
+5. ❌ Reporting only training error or only one split's test error
+
+## What's Next?
+
+In upcoming lectures, we will cover:
+
+- **k-Nearest Neighbors (k-NN)**: A nonparametric method with its own hyperparameter (k)
+- **Regularization**: Ridge, Lasso, and Elastic Net regression
+- **Tree-Based Methods**: Decision trees and random forests
+- **The `caret` and `tidymodels` packages**: Automated CV and hyperparameter tuning
+
+---
+
+# R Session Information
+
+```{r session-info}
+sessionInfo()
+```

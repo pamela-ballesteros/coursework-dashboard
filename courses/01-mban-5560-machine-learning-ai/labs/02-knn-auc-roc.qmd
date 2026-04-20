@@ -1,0 +1,439 @@
+---
+title: "<span style='color: red; font-size: 30px;'>AUC & ROC with kNN</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+Let's use our mnsit data to illustrate the AUC and ROC concepts. We will use the `knn3` model in the`caret` package to classify the data. kNN, by default, does use a majority voting system among the k nearest neighbors to make a classification. This system doesn't provide a probabilistic output but a class label directly, which seems to conflict with the typical practice of "finding the optimal discriminating threshold".  However, let's delve a bit deeper to clarify this:
+
+- **Standard kNN:** In its standard form, kNN doesn't provide a probability estimate but simply a class label based on the majority vote. Hence, without modification, it doesn't naturally lend itself to producing an ROC curve.
+- **Modified kNN:** However, you can modify kNN to provide probability estimates. For instance, instead of just using the majority class among the k nearest neighbors, you can calculate the proportion of neighbors belonging to each class. This proportion can act as a probability estimate for class membership.
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(dslabs)
+library(class)
+library(pROC)
+library(caret)
+```
+
+# Load the data
+
+```{r}
+data(mnist_27)
+str(mnist_27)
+
+table(mnist_27$train$y) # data is well-balanced
+
+#scale the data
+
+train <- mnist_27$train
+test <- mnist_27$test
+
+train$x_1 <- scale(mnist_27$train$x_1)
+train$x_2 <- scale(mnist_27$train$x_2)
+
+test$x_1 <- scale(mnist_27$test$x_1)
+test$x_2 <- scale(mnist_27$test$x_2)
+```
+
+# Modified kNN
+
+We can modify kNN to provide probability estimates. For instance, instead of just using the majority class among the k nearest neighbors, we can calculate the proportion of neighbors belonging to each class. This proportion can act as a probability estimate for class membership.
+
+Here is our earlier function, but now we will modify it to return the proportion of neighbors belonging to each class.  Let's use k = 21, as it seems to be about the best k for this data.
+
+```{r}
+find_probabilities <- function(new_point, k) {
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  label_proportions <- table(nearest_labels) / k
+  return(label_proportions)
+}
+
+new_data <- test[, 2:3]
+new_prob <- apply(new_data, 1, function(x) find_probabilities(x, k = 21))
+new_prob <- t(new_prob)
+```
+
+Since we have the predicted probabilities, we can try different thresholds to see how the ROC curve changes.  We should first a function that calculates TPR and FPR for a given threshold.
+
+We need to decide the positive class.  Let's say we are interested in the digit 2.  Then, we can define the positive class as 2 and the negative class as 7.  We can then calculate the TPR and FPR for a given threshold.
+
+```{r}
+# Convert the labels in new_prob to 0 and 1
+new_prob <- data.frame(new_prob)
+names(new_prob) <- c("prob_2 as 1", "prob_7 as 0")
+```
+
+Here is the function that calculates TPR and FPR for a given threshold.
+
+```{r}
+# Function to calculate TPR and FPR at each threshold
+calculate_tpr_fpr <- function(prob, true_labels, threshold) {
+  if (threshold == 0) {
+    predicted_labels <- rep(1, length(prob))
+  } else {
+    predicted_labels <- ifelse(prob > threshold, 1, 0)
+  }
+
+  true_positive <- sum(predicted_labels == 1 & true_labels == 2)
+  false_positive <- sum(predicted_labels == 1 & true_labels == 7)
+  true_negative <- sum(predicted_labels == 0 & true_labels == 7)
+  false_negative <- sum(predicted_labels == 0 & true_labels == 2)
+  
+  total_2 = sum(true_labels == 2)
+  total_7 = sum(true_labels == 7)
+  
+  tpr <- true_positive / total_2
+  fpr <- false_positive / total_7
+  specificity <- true_negative / total_7
+  
+  return(c(tpr, fpr, specificity, true_positive, 
+           false_positive, true_negative, false_negative,
+           threshold, total_2, total_7))
+}
+```
+
+Now we can plot `tpr` vs `fpr`, which is call the ROC curve
+
+# ROC Curve and AUC
+
+For the digit 2.
+
+```{r}
+# Define a sequence of thresholds
+thresholds <- seq(0, 1, by = 0.01)
+
+# Calculate TPR and FPR for each threshold
+tpr_fpr_list <- lapply(thresholds, function(threshold) calculate_tpr_fpr(new_prob[, 1], test$y, threshold))
+
+# Convert the list to a matrix for easier handling
+tpr_fpr <- do.call(rbind, tpr_fpr_list)
+colnames(tpr_fpr) <- c("tpr", "fpr", "specificity", "true_positive",
+                       "false_positive", "true_negative", "false_negative",
+                       "threshold", "total_2", "total_7")
+
+ggplot(data.frame(tpr = tpr_fpr[, 1], fpr = tpr_fpr[, 2]), aes(x = fpr, y = tpr)) +
+  geom_line(color = "blue") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  labs(x = "False Positive Rate", y = "True Positive Rate", title = "ROC Curve for Digit 2") +
+  theme_minimal()
+```   
+
+`do.call` is a very useful function in R that allows you to call a function with arguments specified in a list or as a set of arguments. It's particularly handy when you have a list of arguments and you want to pass them to a function without explicitly writing out each argument. This function is often used in conjunction with functions like `lapply` or `sapply` to simplify and streamline complex operations.
+
+## Using `ROCR` and `pROC` packages
+
+### Using ROCR package
+
+```{r}
+# now let's use ROCR package to plot the ROC curve
+library(ROCR)
+pred <- prediction(new_prob[, 1], test$y == 2)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, lwd = 2,
+     main = "ROC curve for digit 2",
+     colorize = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "red")
+```
+It seems that as the "area under the curve" (AUC) is high, it shows the .  Let's calculate it.
+
+```{r}
+# And let's calculate the AUC
+auc <- performance(pred, "auc")
+auc@y.values[[1]]
+```
+
+The AUC is about 0.90, which is very high.  The ROC curve is a graphical representation that plots the True Positive Rate (sensitivity) against the False Positive Rate (1 - specificity) at various threshold settings. The AUC represents **the probability that a randomly chosen positive instance (Digit 2) is ranked higher by the classifier than a randomly chosen negative instance (Digit 7)**. The AUC is a single scalar value that summarizes the performance of the classifier across all possible thresholds.
+
+An AUC of 90\% is typically considered very good, as it is close to 1 (or 100%), indicating high separability. An AUC of 50\% would indicate no discriminative ability (equivalent to random guessing), and an AUC of 100% would indicate perfect classification.
+
+This measure is particularly useful because it is independent of the threshold chosen to determine the positive class and provides a single measure of performance across all classification thresholds. It is also invariant to changes in the class distribution, making it a good metric for evaluating the intrinsic quality of the model's predictions.
+
+### Using pROC package
+
+```{r}
+roc_obj <- roc(test$y, new_prob[, 1], levels = c("7", "2"), 
+               direction = "<", percent = TRUE,
+               xlim = c(100, 0), plot = TRUE,
+               xlab = "False Positive Percentage", ylab = "True Postive Percentage",
+               print.auc = TRUE)
+ggroc(roc_obj, legacy.axes = T) +
+  geom_abline(slope = 1 ,intercept = 0) + # add identity line
+  xlab('100% - Specificity') +
+  ylab('100% - Sensitivity') +
+  theme_minimal()
+```
+
+# Tuning kNN with AUC
+
+## Parallel Processing
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+# Let's use the `knn3` model in the `caret` package to classify the data
+library(caret)
+library(foreach)
+library(doParallel)
+library(ROCR)
+
+grid <- seq(5, 120, by = 1)
+
+# Register the parallel back-end to use
+no_cores <- detectCores() - 1  # reserve one core for the system
+cl <- makeCluster(no_cores)
+registerDoParallel(cl)
+
+# Using foreach for parallel processing
+mauc <- foreach(i = grid, .combine = 'c', .packages = c('caret', "ROCR")) %dopar% {
+  
+  aucc <- c()
+  
+  for (j in 1:50) {
+    set.seed(j)
+    ind <- unique(sample(nrow(train), nrow(train), replace = TRUE))
+    traint <- train[ind, ]
+    val <- train[-ind, ]
+    
+    model <- knn3(y ~ ., data = traint, k = i)
+    phat <- predict(model, val, type = "prob")
+    
+    pred_rocr <- prediction(phat[, 1], val$y == 2)
+    auc_rocr <- performance(pred_rocr, "auc")
+    aucc[j] <- auc_rocr@y.values[[1]]
+  }
+  
+  mean(aucc)
+
+}
+
+# Stop the cluster
+stopCluster(cl)
+
+# Plot the training AUC vs k
+plot(grid, mauc, type = "o", xlab = "k", ylab = "AUC", lwd = 1.5, col = "blue")
+optimal_k <- grid[which.max(mauc)]
+abline(v = optimal_k, lty = 2, col = "red", lwd = 2)
+text(x = 70, y = 0.89, labels = paste("k =", optimal_k, "\nAUC =", round(max(mauc),5)), pos = 4, col = "red")
+```
+
+## The single core
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+library(caret)
+library(foreach)
+library(doParallel)
+library(ROCR)
+
+grid <- seq(5, 120, by = 1)
+mauc <- c()
+
+for (i in 1:length(grid)) {
+  
+  aucc <- c()
+  
+  for (j in 1:25) {
+  
+    set.seed(j)
+    ind <- unique(sample(nrow(train), nrow(train), replace = TRUE))
+    traint <- train[ind, ]
+    val <- train[-ind, ]
+    
+    model <- knn3(y ~ ., data = traint, k = i)
+    phat <- predict(model, val, type = "prob")
+    
+    pred_rocr <- prediction(phat[, 1], val$y == 2)
+    auc_rocr <- performance(pred_rocr, "auc")
+    aucc[j] <- auc_rocr@y.values[[1]]
+  
+  }
+  
+  mauc[i] <- mean(aucc)
+  
+}
+
+
+# Plot the training AUC vs k
+plot(grid, mauc, type = "o", xlab = "k", ylab = "AUC", lwd = 1.5, col = "blue")
+optimal_k <- grid[which.max(mauc)]
+abline(v = optimal_k, lty = 2, col = "red", lwd = 2)
+text(x = 70, y = 0.82, labels = paste("k =", optimal_k, "\nAUC =", round(max(mauc),5)), pos = 4, col = "red")
+```
+
+# Test score and threshold
+
+Now that we've tuned our kNN model using AUC on the training data, it's time to evaluate it on the **held-out test set**. This is the moment of truth—the test set has never been seen during training or hyperparameter tuning, so it gives us an unbiased estimate of how well our model generalizes.
+
+But there's a subtlety: the model outputs **predicted probabilities**, not class labels directly. To convert probabilities into predictions (e.g., "Digit 2" or "Digit 7"), we need a **discrimination threshold**. By default, we often use 0.5—but is that really the best choice?
+
+## Youden's J statistic
+
+In ROC analysis, the best threshold is often considered to be the one that is furthest away from the line of no-discrimination (the diagonal line from the bottom-left to the top-right in an ROC plot). This point maximizes both sensitivity (true positive rate) and specificity (1 - false positive rate) for the classifier. A common metric used to find this best threshold is **Youden's J statistic**.
+
+Youden's index is defined as:
+
+$$J = \text{Sensitivity} + \text{Specificity} - 1$$
+
+or equivalently:
+
+$$J = \text{TPR} + \text{TNR} - 1 = \text{TPR} - \text{FPR}$$
+
+This statistic ranges from 0 to 1, where 0 indicates no discriminative power (equivalent to random guessing), and 1 indicates perfect discrimination. The threshold corresponding to the maximum Youden's index is often considered the "optimal" cutoff point for decision-making. Geometrically, it is the point on the ROC curve that is **furthest from the diagonal** (the line of no-discrimination).
+
+## Test AUC and optimal threshold
+
+Let's use the optimal k found from the previous section to build our final model, evaluate it on the test set, and find the optimal discrimination threshold.
+
+```{r}
+# Use the optimal k from the tuning section (not hardcoded!)
+cat("Using optimal k =", optimal_k, "from tuning\n")
+
+model <- knn3(y ~ ., data = train, k = optimal_k)
+phat <- predict(model, test, type = "prob")
+
+# Calculate the test AUC
+pred_rocr <- prediction(phat[, 1], test$y == 2)
+auc_rocr <- performance(pred_rocr, "auc")
+test_auc <- auc_rocr@y.values[[1]]
+cat("Test AUC:", round(test_auc, 4), "\n")
+
+# Extract sensitivity and specificity across all thresholds
+perf <- performance(pred_rocr, "sens", "spec")
+sensitivity <- perf@y.values[[1]]
+specificity <- perf@x.values[[1]]
+
+# Calculate Youden's Index at each threshold
+youden_index <- sensitivity + specificity - 1
+
+# Find the maximum Youden's index and corresponding cutoff
+max_index <- which.max(youden_index)
+
+cat("Maximum Youden's J:", round(youden_index[max_index], 4), "\n")
+cat("Optimal threshold:", round(perf@alpha.values[[1]][max_index], 4), "\n")
+```
+
+## Visualizing the optimal threshold on the ROC curve
+
+The ROC curve below shows the trade-off between sensitivity and specificity at every possible threshold. The red dot marks the **optimal operating point**—the threshold that maximizes Youden's J statistic. This is the point on the curve that is furthest from the diagonal line of no-discrimination.
+
+```{r}
+# Get TPR and FPR for plotting the ROC curve
+perf_roc <- performance(pred_rocr, "tpr", "fpr")
+tpr_vals <- perf_roc@y.values[[1]]
+fpr_vals <- perf_roc@x.values[[1]]
+
+# The optimal point on the ROC curve
+optimal_threshold <- perf@alpha.values[[1]][max_index]
+optimal_tpr <- sensitivity[max_index]
+optimal_fpr <- 1 - specificity[max_index]
+
+# Plot the ROC curve with the optimal threshold highlighted
+plot(fpr_vals, tpr_vals, type = "l", lwd = 2, col = "blue",
+     xlab = "False Positive Rate (1 - Specificity)",
+     ylab = "True Positive Rate (Sensitivity)",
+     main = paste0("Test ROC Curve (k = ", optimal_k, ", AUC = ", round(test_auc, 3), ")"))
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+# Mark the optimal threshold point
+points(optimal_fpr, optimal_tpr, col = "red", pch = 19, cex = 2)
+
+# Draw a line from the diagonal to the optimal point to show Youden's J
+# The closest point on the diagonal to (fpr, tpr) where tpr = fpr
+mid <- (optimal_fpr + optimal_tpr) / 2
+segments(mid, mid, optimal_fpr, optimal_tpr, col = "red", lty = 2, lwd = 1.5)
+
+# Add annotation
+text(optimal_fpr + 0.05, optimal_tpr - 0.06,
+     labels = paste0("Threshold = ", round(optimal_threshold, 3),
+                    "\nTPR = ", round(optimal_tpr, 3),
+                    "\nFPR = ", round(optimal_fpr, 3),
+                    "\nJ = ", round(youden_index[max_index], 3)),
+     pos = 4, col = "red", cex = 0.85)
+
+legend("bottomright", legend = c("ROC Curve", "Optimal (Youden's J)", "No-discrimination line"),
+       col = c("blue", "red", "gray"), lty = c(1, NA, 2), pch = c(NA, 19, NA),
+       lwd = c(2, NA, 1), cex = 0.8)
+```
+
+## Default (0.5) vs. optimal threshold
+
+A common question students ask: **"Why not just use 0.5 as the threshold?"** The default threshold of 0.5 assigns the class with the higher probability, which seems intuitive. However, this is only optimal when:
+
+1. The classes are perfectly balanced
+2. The costs of false positives and false negatives are equal
+3. The model's predicted probabilities are well-calibrated
+
+In practice, these conditions rarely hold simultaneously. Let's compare the default 0.5 threshold against the Youden-optimal threshold to see the practical difference:
+
+```{r}
+# Helper function to build a clean confusion matrix and compute metrics
+evaluate_threshold <- function(phat, true_labels, threshold, label = "Threshold") {
+  predicted <- ifelse(phat[, 1] > threshold, 2, 7)
+  predicted <- factor(predicted, levels = c(2, 7))
+  actual <- factor(true_labels, levels = c(2, 7))
+  
+  cm <- table(Predicted = predicted, Actual = actual)
+  
+  tp <- cm["2", "2"]
+  fp <- cm["2", "7"]
+  fn <- cm["7", "2"]
+  tn <- cm["7", "7"]
+  
+  accuracy    <- (tp + tn) / sum(cm)
+  sensitivity <- tp / (tp + fn)   # TPR
+  specificity <- tn / (tn + fp)   # TNR
+  precision   <- tp / (tp + fp)   # PPV
+  f1          <- 2 * (precision * sensitivity) / (precision + sensitivity)
+  
+  cat("\n========================================\n")
+  cat(label, "=", round(threshold, 4), "\n")
+  cat("========================================\n")
+  print(cm)
+  cat("\nAccuracy:   ", round(accuracy, 4), "\n")
+  cat("Sensitivity:", round(sensitivity, 4), "(TPR - detecting Digit 2)\n")
+  cat("Specificity:", round(specificity, 4), "(TNR - correctly ruling out Digit 7)\n")
+  cat("Precision:  ", round(precision, 4), "\n")
+  cat("F1 Score:   ", round(f1, 4), "\n")
+  
+  return(c(accuracy = accuracy, sensitivity = sensitivity, 
+           specificity = specificity, precision = precision, f1 = f1))
+}
+
+# Evaluate at the default 0.5 threshold
+metrics_default <- evaluate_threshold(phat, test$y, 0.5, "Default threshold")
+
+# Evaluate at the optimal (Youden) threshold
+metrics_optimal <- evaluate_threshold(phat, test$y, optimal_threshold, "Optimal threshold (Youden)")
+```
+
+```{r}
+# Side-by-side comparison
+comparison <- data.frame(
+  Metric = c("Accuracy", "Sensitivity (TPR)", "Specificity (TNR)", "Precision", "F1 Score"),
+  Default_0.5 = round(metrics_default, 4),
+  Optimal_Youden = round(metrics_optimal, 4)
+)
+comparison$Difference <- comparison$Optimal_Youden - comparison$Default_0.5
+print(comparison, row.names = FALSE)
+```
+
+### Key Takeaways
+
+1. **The optimal threshold is not always 0.5.** Depending on the model and the data, the Youden-optimal threshold can be higher or lower. In our case, it may shift to better balance sensitivity and specificity.
+
+2. **Different thresholds serve different goals.** If we care more about detecting Digit 2 (high sensitivity), we'd lower the threshold. If we care more about avoiding false alarms (high specificity), we'd raise it. The Youden threshold offers a balanced compromise.
+
+3. **The test AUC gives an overall picture**, while the **threshold determines the operating point** on the ROC curve. A high AUC means the model is good at separating the classes across all thresholds, but the specific threshold you choose determines the actual trade-off between sensitivity and specificity in deployment.
+
+4. **Always evaluate on the test set.** The tuning AUC (from Section 4) was computed via bootstrap cross-validation on the training data. The test AUC here is our unbiased estimate of generalization performance. If there is a large gap between training AUC and test AUC, it may indicate overfitting.
+

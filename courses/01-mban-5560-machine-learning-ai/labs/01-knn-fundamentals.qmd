@@ -1,0 +1,761 @@
+---
+title: "<span style='color: red; font-size: 30px;'>k Nearest Neighbors (kNN) - Fundamentals</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+# Distances
+
+In k-Nearest Neighbors (kNN), the concept of distance is fundamental for determining the nearest neighbors of a given data point. Several distance metrics can be used, each with its characteristics and suitability for different types of data. The main distance metrics commonly used in kNN are:
+
+## Euclidean Distance:
+
+The Euclidean distance is the straight-line distance between the two points. It is the most commonly used distance metric in kNN. The Euclidean distance between two points $\mathbf{x}=\left(x_{1}, x_{2}\right)$ and $\mathbf{y}=\left(y_{1}, y_{2}\right)$ is given by:
+
+$$
+d\left(\mathbf{x}, \mathbf{y}\right)=\sqrt{\left(x_{1}-x_{2}\right)^2+\left(y_{1}-y_{2}\right)^2}
+$$
+
+```{r}
+# Euclidean Distance
+EDistance <- function(x, y){
+  n <- length(x)
+  dd <- matrix(0, n, n)
+  
+  for (i in 1:n) {
+    for (j in 1:n) {
+      dd[i, j] <- sqrt((x[i] - x[j])^2 + (y[i] - y[j])^2)
+    }
+  }
+  return(dd)
+}
+
+# Example
+x1 <- c(2, 2.1, 4, 4.3)
+x2 <- c(3, 3.3, 5, 5.1)
+EDistance(x1, x2)
+```
+
+## Manhattan Distance:
+
+The Manhattan distance is the sum of the absolute differences between the two points. The Manhattan distance between two points $\mathbf{x}=\left(x_{1}, x_{2}\right)$ and $\mathbf{y}=\left(y_{1}, y_{2}\right)$ is given by:
+
+$$
+d\left(\mathbf{x}, \mathbf{y}\right)=\left|x_{1}-x_{2}\right|+\left|y_{1}-y_{2}\right|
+$$
+
+```{r}
+# Manhattan Distance
+MDistance <- function(x, y){
+  n <- length(x)
+  dd <- matrix(0, n, n)
+  
+  for (i in 1:n) {
+    for (j in 1:n) {
+      dd[i, j] <- abs(x[i] - x[j]) + abs(y[i] - y[j])
+    }
+  }
+  return(dd)
+}
+```
+
+## Chebyshev Distance:
+
+The Chebyshev distance is the maximum absolute difference between the two points. The Chebyshev distance between two points $\mathbf{x}=\left(x_{1}, x_{2}\right)$ and $\mathbf{y}=\left(y_{1}, y_{2}\right)$ is given by:
+
+$$
+d\left(\mathbf{x}, \mathbf{y}\right)=\max \left(\left|x_{1}-x_{2}\right|,\left|y_{1}-y_{2}\right|\right)
+$$
+
+```{r}
+# Chebyshev Distance
+CDistance <- function(x, y){
+  n <- length(x)
+  dd <- matrix(0, n, n)
+  
+  for (i in 1:n) {
+    for (j in 1:n) {
+      dd[i, j] <- max(abs(x[i] - x[j]), abs(y[i] - y[j]))
+    }
+  }
+  return(dd)
+}
+```
+
+# Example: finding NN with k = 2
+
+```{r}
+x1 <- c(2, 2.1, 4, 4.3, 1.5, 3.2, 6, 5.5, 7, 2.5, 4.5, 3.8, 6.2, 5, 7.3)
+x2 <- c(3, 3.3, 5, 5.1, 2, 4.2, 6.5, 5.8, 7.2, 3.1, 4.7, 3.6, 6.1, 5.2, 7.6)
+
+distanceMatrix <- EDistance(x1, x2)
+print(distanceMatrix)
+```
+
+Given that distance matrix, we can find the nearest neighbors of each point. For example, the nearest neighbors of the first point are the second and tenth points. The nearest neighbors of the second point are the first and tenth points, and so on. Let's write a function to find the nearest neighbors of each point.
+
+```{r}
+findNN <- function(distanceMatrix, k) {
+  n <- nrow(distanceMatrix)
+  nearestNeighbors <- matrix(NA, n, k)
+  
+  for (i in 1:n) {
+    # Sort distances
+    sortedDistances <- sort(distanceMatrix[i, ], index.return = TRUE)
+    
+    # Get the indices of the nearest neighbors (first two elements after the first)
+    nnIndices <- sortedDistances$ix[2:(k + 1)]
+    nearestNeighbors[i,] <- nnIndices
+  }
+  return(nearestNeighbors)
+}
+
+distanceMatrix <- EDistance(x1, x2)
+nearestNeighbors <- findNN(distanceMatrix, 2)
+print(nearestNeighbors)
+```
+
+# More realistics example
+
+Our job is to predict the labels of the new data points (blue points) based on the labels of the training data (red and black points). We will develop a very simple kNN algorithm to predict the labels of the new data points.
+
+```{r, fig.width=6, fig.height=6}
+n = 25
+
+# Our data
+set.seed(12)
+x1 <- runif(n)  # 15 random values for x1
+x2 <- runif(n)  # 15 random values for x2
+y <- sample(c(0, 1), n, replace = TRUE)  
+
+# New data - with unknown labels
+set.seed(222)
+x1_new <- runif(5)  
+x2_new <- runif(5)  
+
+# Plot the data
+colors <- ifelse(y == 1, "red", "black")
+plot(x1, x2, col = colors, xlab = "x1", ylab = "x2", lwd = 2)
+points(x1_new, x2_new, col = "blue", pch = 4, lwd = 2)
+```
+
+Let's try with k = 5. For each new data point, we will find the 5 nearest neighbors and assign the most common label to the new data point.
+
+```{r}
+k <- 5  
+new_labels <- c()
+
+for (i in 1:length(x1_new)) {
+  # Calculate distances for the i-th new point to all old points
+  distances <- sqrt((x1_new[i] - x1)^2 + (x2_new[i] - x2)^2)
+  
+  # Find the k nearest points
+  nearest <- order(distances)[1:k]
+  
+  # Find the labels of the k nearest points
+  nearest_labels <- y[nearest]
+  
+  # Find the most common label
+  new_labels[i] <- names(which.max(table(nearest_labels)))
+}
+
+print(new_labels)
+
+# Plot the new data with the new labels
+colors <- ifelse(y == 1, "red", "black")
+plot(x1, x2, col = colors, xlab = "x1", ylab = "x2", lwd = 2)
+colors_new <- ifelse(new_labels == 1, "red", "black")
+points(x1_new, x2_new, col = colors_new, pch = 4, lwd = 2)
+```
+
+# `mnist_27` dataset
+
+```{r}
+#loading the data
+library(tidyverse)
+library(dslabs)
+library(parallel)
+
+data("mnist_27")
+str(mnist_27)
+
+#Scale the data.  
+mdata <- mnist_27$train
+mdata$x_1 <- scale(mdata$x_1)
+mdata$x_2 <- scale(mdata$x_2)
+```
+
+Split `mdata` into training and validation sets. For now we split it 75% and 25%
+
+```{r}
+set.seed(1)
+ind <- sample(nrow(mdata), nrow(mdata) * 0.75, replace = FALSE)
+train <- mdata[ind, ]
+val <- mdata[-ind, ]
+
+# Plot the training data and validation data together
+colors <- ifelse(train$y == 7, "red", "black")
+plot(train$x_1, train$x_2, col = colors, xlab = "x1", ylab = "x2", lwd = 1)
+points(val$x_1, val$x_2, col = "green", pch = 4, lwd = 0.75)
+```
+
+We want to train a model that identifies the green points (validation set) very well. Let's have a function:
+
+```{r}
+# Function to determine the label for a validation set
+find_label <- function(new_point, k){
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  return(names(which.max(table(nearest_labels))))
+}
+```
+
+Now let's apply this function to the validation set and calculate the accuracy. Here accuracy is defined as the proportion of correct labels in the validation set. This is a correct way to measure accuracy when the classes are balanced (i.e. there are roughly the same number of 0's and 1's).
+
+```{r}
+# Pick your k
+new_data <- val[, 2:3]
+new_labels <- apply(new_data, 1, function(x) find_label(x, k = 30))
+acc <- mean(new_labels == val$y)
+acc
+```
+
+## Single-run grid search for k
+
+```{r, cache=TRUE}
+# Same function as before, but now we pass k as an argument
+find_label <- function(new_point, k){
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  return(names(which.max(table(nearest_labels))))
+}
+
+# to compute accuracy for a grid of k's
+acc <- c()
+grid <- seq(5, 100, by = 2)
+
+for (i in 1:length(grid)) {
+  k <- grid[i]
+  set.seed(1)
+  ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+  train <- mdata[ind, ]
+  val <- mdata[-ind, ]
+  new_data <- val[, 2:3]
+  new_labels <- apply(new_data, 1, function(x) find_label(x, k = k))
+  acc[i] <- mean(new_labels == val$y)
+}
+
+plot(grid, acc, type = "l", xlab = "k", ylab = "Accuracy")
+```
+
+Note that in the code above, `set.seed(1)` is called inside the loop, which means the same train/validation split is used for every value of k. This can be confusing because it *looks* like we're re-splitting the data each iteration. A cleaner approach is to move the data split outside the loop:
+
+```{r, cache=TRUE}
+# Same function as before
+find_label <- function(new_point, k){
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  return(names(which.max(table(nearest_labels))))
+}
+
+# Split the data ONCE - outside the loop
+set.seed(1)
+ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+train <- mdata[ind, ]
+val <- mdata[-ind, ]
+new_data <- val[, 2:3]
+
+# Now loop only over k values
+acc <- c()
+grid <- seq(5, 100, by = 2)
+
+for (i in 1:length(grid)) {
+  new_labels <- apply(new_data, 1, function(x) find_label(x, k = grid[i]))
+  acc[i] <- mean(new_labels == val$y)
+}
+
+plot(grid, acc, type = "l", xlab = "k", ylab = "Accuracy")
+```
+
+This version makes it explicit that we're using the same train/validation split for all k values, and only varying k. This is why it's called "single-run" - one split, multiple k values.
+
+We can show that there is another way to do that with `sapply`:
+
+```{r}
+# Same function as before
+find_label <- function(new_point, k){
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  return(names(which.max(table(nearest_labels))))
+}
+
+# Function to compute accuracy with splits
+compute_accuracy <- function(k) {
+  set.seed(1)
+  ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+  train <- mdata[ind, ]
+  val <- mdata[-ind, ]
+  new_data <- val[, 2:3]
+  new_labels <- apply(new_data, 1, function(x) find_label(x, k = k))
+  return(mean(new_labels == val$y))
+}
+
+# Compute accuracy for different values of k using `sapply`
+grid <- seq(5, 100, by = 2)
+acc <- sapply(grid, compute_accuracy)
+plot(grid, acc, type = "l", xlab = "k", ylab = "Accuracy")
+```
+
+## Multi-run grid search (training the model) for k
+
+```{r}
+find_label <- function(new_point, k){
+  distances <- sqrt((new_point[1] - train[, 2])^2 + (new_point[2] - train[, 3])^2)
+  nearest <- order(distances)[1:k]
+  nearest_labels <- train$y[nearest]
+  return(names(which.max(table(nearest_labels))))
+}
+
+macc <- c()
+u95 <- c()
+l95 <- c()
+grid <- seq(5, 100, by = 2)
+
+for (k in 1:length(grid)) {
+
+  acc <- c()
+  
+  for (i in 1:30) {
+    set.seed(i)
+    ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+    train <- mdata[ind, ]
+    val <- mdata[-ind, ]
+    new_data <- val[, 2:3]
+    new_labels <- apply(new_data, 1, function(x) find_label(x, k = grid[k]))
+    acc[i] <- mean(new_labels == val$y)
+  }  
+  macc[k] <- mean(acc)
+}
+
+plot(grid, macc, type = "l", xlab = "k", ylab = "Accuracy")
+```
+
+## Grid search with parallel computing (`mclapply`)
+
+### Why Parallel Computing?
+
+When performing grid search with multiple bootstrap iterations, we face a significant computational challenge. Consider our task: for each value of k in our grid (say, 116 values from 5 to 120), we run 30 bootstrap iterations. That's 116 × 30 = 3,480 model training and evaluation cycles. Each cycle involves:
+
+1. Sampling the data
+2. Training the kNN model
+3. Making predictions on the validation set
+4. Computing accuracy
+
+Running these sequentially means each operation waits for the previous one to complete. However, most modern computers have multiple CPU cores (typically 4-16+), and these iterations are **completely independent** of each other—the result of iteration 15 doesn't depend on iteration 14. This makes our problem "embarrassingly parallel," meaning it can be easily divided into parallel tasks with minimal coordination overhead.
+
+### Mac/Linux vs Windows: A Critical Difference
+
+One of the most important things to understand about parallel computing in R is that **Mac/Linux and Windows handle parallelization fundamentally differently**:
+
+**Mac and Linux - Process Forking:**
+
+- These systems support "forking," where the operating system creates child processes that share memory with the parent process
+- `mclapply()` (multicore lapply) uses forking and is extremely efficient
+- Child processes automatically have access to all variables and loaded packages from the parent
+- Very low overhead to start parallel tasks
+
+**Windows - No Forking Support:**
+
+- Windows does not support forking
+- Instead, Windows uses "socket clusters" where separate R processes are spawned
+- Each worker process starts fresh and needs to be explicitly sent any data, functions, and packages it needs
+- `mclapply()` **silently falls back to sequential execution on Windows** (it just runs `lapply()`)
+- Must use `parLapply()`, `clusterApply()`, or `foreach` with explicit cluster setup
+
+This is why code that runs blazingly fast on a Mac might show no speedup on Windows—`mclapply()` simply doesn't parallelize on Windows!
+
+### Different Packages and Approaches
+
+R has several packages for parallel computing, each with different strengths:
+
+**1. `parallel` (base R since version 2.14)**
+
+The `parallel` package is included with R and provides the foundation for most parallel computing:
+
+- `detectCores()`: Find how many CPU cores are available
+- `mclapply()`: Parallel version of `lapply()` using forking (Mac/Linux only)
+- `makeCluster()`: Create a cluster of R worker processes (works on all platforms)
+- `parLapply()`: Parallel `lapply()` using socket clusters (cross-platform)
+- `clusterExport()`: Send variables to worker processes
+- `clusterEvalQ()`: Load packages on worker processes
+
+**2. `doParallel`**
+
+This package provides a parallel backend for the `foreach` package and integrates well with `caret`:
+
+- `registerDoParallel(cl)`: Register a cluster as the parallel backend
+- `registerDoSEQ()`: Unregister and return to sequential execution
+- Works seamlessly with `caret::train()` when registered
+
+**3. `foreach`**
+
+Provides an iterator-based approach to parallelism:
+
+- `foreach(...) %dopar% { }`: Execute loop iterations in parallel
+- `foreach(...) %do% { }`: Execute sequentially (for debugging)
+- `.combine` parameter specifies how to combine results (e.g., `c`, `rbind`, `+`)
+- Requires a registered parallel backend (like `doParallel`)
+
+**4. `future` and `furrr` (Modern Approach)**
+
+The `future` ecosystem provides a unified, modern API:
+
+- `plan(multisession)`: Use multiple R sessions (works on all platforms)
+- `plan(multicore)`: Use forking (Mac/Linux only, but faster)
+- `furrr::future_map()`: Parallel version of `purrr::map()`
+- **Automatically handles platform differences**—same code works on Mac and Windows
+- Recommended for new projects
+
+### Setting Up Parallel Computing: Key Steps
+
+**Step 1: Detect available cores**
+```
+no_cores <- detectCores() - 1  # Leave one core for system tasks
+```
+
+**Step 2: Create a cluster** (required for Windows, optional for Mac/Linux with `mclapply`)
+```
+cl <- makeCluster(no_cores)
+```
+
+**Step 3: Register the parallel backend** (if using `foreach` or `caret`)
+```
+registerDoParallel(cl)
+```
+
+**Step 4: Export variables and load packages on workers** (for socket clusters)
+```
+clusterExport(cl, c("mdata", "compute_accuracy"))  # Send variables
+clusterEvalQ(cl, library(caret))                    # Load packages
+```
+
+**Step 5: Run parallel computation**
+```
+# Using mclapply (Mac/Linux)
+results <- mclapply(params_list, compute_accuracy, mc.cores = no_cores)
+
+# Using parLapply (cross-platform)
+results <- parLapply(cl, params_list, compute_accuracy)
+
+# Using foreach
+results <- foreach(i = 1:n, .combine = c) %dopar% { compute_accuracy(i) }
+```
+
+**Step 6: Clean up**
+```
+stopCluster(cl)
+registerDoSEQ()  # Unregister parallel backend
+```
+
+### Important Considerations
+
+1. **Overhead**: Starting parallel workers has overhead. For very fast operations, sequential might be faster.
+
+2. **Memory**: Each worker needs memory. With 8 workers, you might use 8× the memory.
+
+3. **Random seeds**: Each worker needs its own seed for reproducibility. Use `set.seed()` inside the function or use `clusterSetRNGStream()`.
+
+4. **Global variables**: With socket clusters, workers don't automatically see your variables. You must export them explicitly.
+
+5. **Debugging**: Errors in parallel code can be hard to trace. Test with `%do%` or sequential execution first.
+
+The code below uses `mclapply()` which works efficiently on Mac/Linux. On Windows, you would need to modify it to use `parLapply()` with explicit cluster setup and variable export.
+
+```{r, cache=TRUE}
+library(doParallel)
+
+compute_accuracy <- function(params) {
+  k <- params$k
+  seed <- params$seed
+  
+  set.seed(seed)  # Set seed for reproducibility
+  ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+  train <- mdata[ind, ]
+  val <- mdata[-ind, ]
+  new_data <- val[, 2:3]
+  
+  find_label <- function(new_point, k, train_data) {
+    distances <- sqrt((new_point[1] - train_data[, 2])^2 + (new_point[2] - train_data[, 3])^2)
+    nearest <- order(distances)[1:k]
+    nearest_labels <- train_data$y[nearest]
+    return(names(which.max(table(nearest_labels))))
+  }
+  
+  new_labels <- apply(new_data, 1, function(x) find_label(x, k, train))
+  return(mean(new_labels == val$y))
+}
+
+# Parallel implementation
+macc_parallel <- c()
+grid <- seq(5, 120, by = 1)
+
+no_cores <- detectCores() - 1
+cl <- makeCluster(no_cores)
+registerDoParallel(cl)
+
+for (k in 1:length(grid)) {
+  # Create parameter list with consistent seeds
+  params_list <- lapply(1:30, function(i) list(k = grid[k], seed = i))
+  
+  # Run parallel computation
+  acc <- unlist(mclapply(params_list, compute_accuracy, mc.cores = no_cores))
+  macc_parallel[k] <- mean(acc)
+}
+
+stopCluster(cl)
+registerDoSEQ()  # Unregister parallel backend
+
+plot(grid, macc_parallel, type = "o", xlab = "k", ylab = "Accuracy", 
+     main = "Parallel Implementation", col = "blue", lwd = 1.5)
+abline(v = grid[which.max(macc_parallel)], lty = 2, col = "red")
+```
+
+# Ready to use packages
+
+There are several packages in R for kNN applications: `knn()` from the `class` package and `knn3()` in the caret package. Since kNN use distances, we should scale the numerical variables first to make their magnitudes on the same scale. The `knn()` function does not do this for us, so we have to do it ourselves. The `knn3()` function in the caret package does this for us. Note also that while `knn3()` handles factor variables itself, which is an internal process, a good one, `knn()` could not do that and requires all features to be numeric.
+
+## `knn3` (from `caret`) - single vs parallel core application
+
+We can use parallel computing to speed it up. The `doParallel` package must be loaded for this to work. The `foreach` package is also useful for parallel computing. The `foreach()` function is similar to the `lapply()` function, but it uses multiple cores.
+
+```{r, cache=TRUE}
+library(caret)
+library(foreach)
+library(doParallel)
+
+# Define consistent parameters
+grid <- seq(5, 120, by = 1)
+n_iterations <- 30
+
+# Function to compute accuracy that will be used in both implementations
+compute_knn_accuracy <- function(k, seed) {
+  set.seed(seed)
+  ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+  train <- mdata[ind, ]
+  val <- mdata[-ind, ]
+  
+  model <- knn3(y ~ ., data = train, k = k)
+  yhat <- predict(model, val, type = "class")
+  return(mean(yhat == val$y))
+}
+
+# Sequential Implementation
+macc_sequential <- numeric(length(grid))
+for (i in seq_along(grid)) {
+  acc <- numeric(n_iterations)
+  for (j in 1:n_iterations) {
+    acc[j] <- compute_knn_accuracy(grid[i], j)
+  }
+  macc_sequential[i] <- mean(acc)
+}
+
+# Parallel Implementation
+no_cores <- detectCores() - 1
+cl <- makeCluster(no_cores)
+registerDoParallel(cl)
+
+# Create parameter combinations
+param_grid <- expand.grid(k = grid, seed = 1:n_iterations)
+macc_parallel <- numeric(length(grid))
+
+for (i in seq_along(grid)) {
+  k_params <- param_grid[param_grid$k == grid[i], ]
+  acc <- unlist(mclapply(1:n_iterations, 
+                        function(x) compute_knn_accuracy(k_params$k[x], k_params$seed[x]), 
+                        mc.cores = no_cores))
+  macc_parallel[i] <- mean(acc)
+}
+
+stopCluster(cl)
+registerDoSEQ()  # Unregister parallel backend
+
+# Compare results visually
+par(mfrow = c(1, 2))
+plot(grid, macc_sequential, type = "o", 
+     xlab = "k", ylab = "Accuracy",
+     main = "Sequential Implementation",
+     col = "blue", lwd = 1.5)
+abline(v = grid[which.max(macc_sequential)], lty = 2, col = "red")
+text(x = 70, y = 0.82, 
+     labels = paste("k =", grid[which.max(macc_sequential)], 
+                   "\nAccuracy =", round(max(macc_sequential), 5)),
+     pos = 4, col = "red")
+
+plot(grid, macc_parallel, type = "o", 
+     xlab = "k", ylab = "Accuracy",
+     main = "Parallel Implementation",
+     col = "blue", lwd = 1.5)
+abline(v = grid[which.max(macc_parallel)], lty = 2, col = "red")
+text(x = 70, y = 0.82, 
+     labels = paste("k =", grid[which.max(macc_parallel)], 
+                   "\nAccuracy =", round(max(macc_parallel), 5)),
+     pos = 4, col = "red")
+
+# Print summary statistics
+cat("\nSequential Implementation - Optimal k:", grid[which.max(macc_sequential)],
+    "\nParallel Implementation - Optimal k:", grid[which.max(macc_parallel)])
+```
+
+
+## `train` by `caret` package
+
+We can use `train`, the automated function for training in `caret`. By default, the cross validation is performed by taking 25 bootstrap samples comprised of 25% of the observations. Moreover, the default is to try k (5,7,9). We can to expand it:
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+library(caret)
+library(foreach)
+library(doParallel)
+
+# Define consistent parameters across both approaches
+grid <- seq(5, 120, by = 1)
+n_iterations <- 25  # Match train()'s default
+sample_prop <- 0.75 # Proportion for training data
+
+# Modified implementation to match train()'s validation approach
+compute_knn_accuracy <- function(k, seed) {
+    set.seed(seed)
+    # Sample indices without replacement to match train()'s approach
+    train_indices <- sample(nrow(mdata), size = floor(nrow(mdata) * sample_prop))
+    train_data <- mdata[train_indices, ]
+    val_data <- mdata[-train_indices, ]
+    
+    model <- knn3(y ~ ., data = train_data, k = k)
+    yhat <- predict(model, val_data, type = "class")
+    return(mean(yhat == val_data$y))
+}
+
+# Sequential implementation with aligned validation
+macc_sequential <- numeric(length(grid))
+for (i in seq_along(grid)) {
+    acc <- numeric(n_iterations)
+    for (j in 1:n_iterations) {
+        acc[j] <- compute_knn_accuracy(grid[i], j)
+    }
+    macc_sequential[i] <- mean(acc)
+}
+
+# Train implementation with matched parameters
+set.seed(123)  # For reproducibility
+train_control <- trainControl(
+    method = "cv",
+    number = n_iterations,
+    p = sample_prop
+)
+
+train_knn <- train(
+    y ~ ., 
+    method = "knn",
+    data = mdata,
+    tuneGrid = data.frame(k = grid),
+    trControl = train_control
+)
+
+# Compare results visually
+par(mfrow = c(1, 2))
+plot(grid, macc_sequential, type = "o", 
+     xlab = "k", ylab = "Accuracy",
+     main = "Manual Implementation",
+     col = "blue", lwd = 1.5)
+abline(v = grid[which.max(macc_sequential)], lty = 2, col = "red")
+
+plot(train_knn$results$k, train_knn$results$Accuracy, 
+     type = "o", xlab = "k", ylab = "Accuracy",
+     main = "train() Implementation",
+     col = "blue", lwd = 1.5)
+abline(v = train_knn$bestTune$k, lty = 2, col = "red")
+
+# Print optimal k values
+cat("\nManual Implementation Optimal k:", grid[which.max(macc_sequential)],
+    "\ntrain() Implementation Optimal k:", train_knn$bestTune$k)
+```
+
+### Why the Results are Different
+
+Despite attempting to align the two implementations, you'll notice they often produce **different optimal k values**. This is because there are fundamental differences that cannot be easily reconciled:
+
+**1. Different Cross-Validation Methods (The Main Cause)**
+
+The manual implementation uses **repeated random subsampling** (Monte Carlo CV):
+```
+train_indices <- sample(nrow(mdata), size = floor(nrow(mdata) * sample_prop))
+```
+Each iteration randomly picks 75% of observations for training—observations can appear in multiple training sets across iterations.
+
+However, `train()` with `method = "cv"` uses **k-fold cross-validation**:
+
+- Data is partitioned into `number` (25) non-overlapping folds
+- Each fold is used exactly ONCE as the validation set
+- All observations appear in exactly one validation fold
+
+These are fundamentally different strategies! To make `train()` use random subsampling like our manual implementation, you would need `method = "LGOCV"` (Leave-Group-Out CV) or `method = "boot"` for bootstrap.
+
+**2. Stratification**
+
+`train()` uses **stratified sampling by default**—it ensures each fold maintains the same class proportions (ratio of 2s to 7s) as the original data. Our manual implementation doesn't stratify, so some samples might have unbalanced classes by chance.
+
+**3. Internal Preprocessing**
+
+Even though we pre-scaled the data, `train()` may apply additional internal preprocessing depending on the method settings.
+
+**4. Random Seed Handling**
+
+- Manual: `set.seed(j)` creates a different random state for each of 25 iterations
+- `train()`: A single `set.seed(123)` before the process, with internal RNG handling
+
+**What We Did Align:**
+
+- Same sampling proportion (75% for training)
+- Same number of iterations (25)
+- Same grid of k values
+- Both use the same underlying `knn3()` algorithm
+
+**The Takeaway:** Different validation strategies can lead to different "optimal" hyperparameters. This is normal and expected. The key is to be consistent within your workflow and understand that the "best" k depends on how you measure it. Both methods are valid—they're just answering slightly different questions about model performance.
+
+## `class` package
+
+```{r, cache=TRUE}
+# Training with kNN
+library(class)
+
+macc <- c()
+grid <- seq(9, 120, by = 1)
+
+for (k in 1:length(grid)) {
+  for (i in 1:30) {
+    set.seed(i)
+    ind <- unique(sample(nrow(mdata), nrow(mdata), replace = TRUE))
+    train <- mdata[ind, ]
+    val <- mdata[-ind, ]
+    knnmodel <- knn(train[, 2:3], val[, 2:3], train$y, k = grid[k])
+    acc[i] <- mean(knnmodel == val$y)
+  }
+  macc[k] <- mean(acc)
+}
+
+# Plotting the accuracy
+plot(grid, macc, type = "l", xlab = "k", ylab = "Accuracy")
+```

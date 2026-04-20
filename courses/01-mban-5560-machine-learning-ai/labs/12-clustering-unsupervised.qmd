@@ -1,0 +1,195 @@
+---
+title: "<span style='color: red; font-size: 50px;'>Unsupervised Learning - Clustering</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN - Winter 2025"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+Clustering is a type of unsupervised learning that groups data points into clusters based on similarity. The goal is to ensure that data points in the same cluster are more similar to each other than to those in other clusters. Clustering is used to discover inherent groupings within data.
+
+**Applications of Clustering:**
+  
+- Market Segmentation: Identifying distinct groups of customers based on purchasing behavior, preferences, or demographic characteristics to tailor marketing strategies. 
+- Anomaly Detection: Grouping data to find patterns or outliers, which can be useful in fraud detection, network security, or fault detection. 
+- Image Segmentation: Partitioning an image into segments where each segment represents an object or part of an object, aiding in image recognition and compression. 
+- Document Clustering: Organizing documents into groups by topic for information retrieval, document organization, and summarization.  
+
+# K-means Clustering
+
+K-means clustering is a popular unsupervised learning algorithm used to partition a dataset into $K$ clusters, where each observation belongs to the cluster with the nearest mean. It's widely used for its simplicity and efficiency. Let's walk through the K-means clustering process step by step using the famous Iris dataset in R. The Iris dataset contains 150 observations of iris flowers, with 4 features (sepal length, sepal width, petal length, and petal width) and a species label for each observation. However, for clustering, we'll ignore the species label to demonstrate how K-means can group the flowers based on the features.
+
+K-means Clustering Algorithm
+
+- Input: $D$, Dataset containing $n$ data points; $K$, the number of clusters to form;`maxIterations`, the maximum number of iterations to run the algorithm (optional, for convergence).  
+- Output: A set of $K$ cluster centroids and the cluster assignments for each data point in $D$.  
+
+Algorithm:
+  
+1. Initialize $K$ centroids randomly: Choose $K$ points from $D$ as the initial centroids. 
+2. Repeat until convergence or until the maximum number of iterations is reached: for each point $x_i$ in $D$, find the nearest centroid $C_j$ and assign $x_i$ to cluster $j$. The nearest is typically defined in terms of Euclidean distance, although other distances can be used depending on the dataset. In the update step, for each cluster $j$, recalculate the centroid by taking the mean of all points assigned to $j$. 
+4. Check for convergence, if the assignments do not change, then stop. Otherwise, return to step 2. 
+
+
+Key Points:  
+  
+- Initialization: The initial choice of centroids can significantly affect the final clusters. Methods like K-means++ can help in choosing initial centroids wisely. 
+- Assignment Step: Each data point is assigned to the cluster with the closest centroid. This minimizes the intra-cluster distances. 
+- Update Step: Centroids are recalculated as the mean of all points in the cluster, effectively moving the centroid to the center of its members. 
+- Convergence: The algorithm repeats the assignment and update steps until the centroids stabilize (show no or minimal change) or a set number of iterations is reached. 
+- Result: The output is a set of $K$ centroids and cluster assignments for each point in the dataset, aiming to minimize within-cluster variance. 
+
+Let's implement K-means clustering in R using the Iris dataset. We'll use the `kmeans` function from the `stats` package to perform the clustering. We'll also visualize the clusters using a scatter plot to see how the algorithm groups the flowers based on their features.
+
+```{r}
+data(iris)
+iris_data <- iris[, -5] # Remove the species column
+head(iris_data)
+```
+
+Before applying K-means, we need to decide the number of clusters ($K$). A common method is the elbow method, which involves plotting the within-cluster sum of squares (WCSS) against the number of clusters, and looking for the 'elbow' point where the rate of decrease sharply changes. This represents a good balance between the number of clusters and the variance explained.
+
+```{r}
+set.seed(123) 
+k <- 3 # Assuming we chose 3 clusters based on the elbow method or other criteria
+kmeans_result <- kmeans(iris_data, centers = k, nstart = 25)
+kmeans_result
+```
+
+The `kmeans` function returns the cluster assignments and the final cluster centroids. We can access these using `kmeans_result$cluster` and `kmeans_result$centers`, respectively. Let's visualize the clusters using a scatter plot to see how the flowers are grouped based on their features.
+
+```{r}
+library(ggplot2)
+
+iris_data$cluster <- as.factor(kmeans_result$cluster)
+ggplot(iris_data, aes(x = Petal.Length, y = Petal.Width, color = cluster)) + 
+  geom_point(size = 3) + 
+  scale_color_manual(values = c("blue", "green", "red")) +
+  labs(title = "K-means Clustering of Iris Flowers", x = "Petal Length", y = "Petal Width")
+```
+
+# PAM (Partitioning Around Medoids)
+
+PAM is a clustering algorithm that is similar to K-means but uses medoids instead of centroids. A medoid is a representative object of a cluster, chosen as the point that minimizes the average dissimilarity to all other points in the cluster. PAM is more robust to noise and outliers compared to K-means, as it uses actual data points as medoids, making it less sensitive to outliers.
+
+```{r}
+library(cluster)
+set.seed(123)
+pam_result <- pam(iris_data, k)
+pam_result
+
+iris_data$cluster_pam <- as.factor(pam_result$clustering)
+ggplot(iris_data, aes(x = Sepal.Length, y = Sepal.Width, color = cluster_pam)) + 
+  geom_point(size = 3) + 
+  scale_color_manual(values = c("blue", "green", "red")) +
+  labs(title = "PAM Clustering of Iris Flowers - Sepal", x = "Petal Length", y = "Petal Width")
+```
+
+# Random Forest for Unsupervised Learning
+
+Random Forest, a popular supervised learning algorithm, can also be used for unsupervised learning tasks such as clustering. The proximity matrix generated by Random Forest can be used as input to clustering algorithms like PAM, providing an alternative approach to clustering.
+
+```{r}
+library(randomForest)
+
+set.seed(123)
+rf <- randomForest(x = iris_data, ntree = 2000, proximity = TRUE)
+
+prox <- rf$proximity
+pam_rf <- pam(prox, k)
+pam_rf$clustering
+
+iris_data$cluster_rf <- as.factor(pam_rf$clustering)
+ggplot(iris_data, aes(x = Petal.Length, y = Sepal.Length, color = cluster_rf)) + 
+  geom_point(size = 3) + 
+  scale_color_manual(values = c("blue", "green", "red")) +
+  labs(title = "PAM Clustering using Random Forest Proximity Matrix - By Length", x = "Petal Length", y = "Sepal.Length")
+```
+
+The **proximity index** in a **Random Forest** is a measure of similarity between data points based on how often they end up in the same terminal node across all trees in the forest. It is commonly used for clustering, detecting outliers, and visualizing data relationships.
+
+1. **Train the Random Forest:** Build multiple decision trees using bootstrapped samples of the data.
+2. **Record Terminal Nodes:** For each tree, note which terminal node (leaf) each observation falls into.
+3. **Compute Pairwise Proximity:**
+   - For every pair of observations $(i, j)$, count how many times they land in the same leaf node across all trees.
+   - Normalize this count by dividing it by the total number of trees.
+   - Mathematically, the proximity between observations $i$ and $j$ is given by:
+     $$
+     P(i, j) = \frac{\text{Number of trees where } i \text{ and } j \text{ are in the same leaf}}{\text{Total number of trees}}
+     $$
+4. **Build the Proximity Matrix:**
+   - This results in an ($n \times n$) **proximity matrix**, where $n$ is the number of observations.
+   - Each entry in the matrix represents the similarity between two observations.
+
+- **High proximity values** (close to 1) indicate that two points often end up in the same leaf node, suggesting they are similar.
+- **Low proximity values** (close to 0) suggest that the points rarely end up in the same leaf, meaning they are dissimilar.
+- The proximity matrix can be used for:
+  - **Clustering** (applying hierarchical or k-means clustering)
+  - **Outlier detection** (low average proximity scores suggest potential anomalies)
+  - **Data visualization** (e.g., using multidimensional scaling (MDS) to create a 2D plot)
+
+- **Unsupervised Learning:** When labels are not available, the proximity matrix helps in grouping similar observations.
+- **Anomaly Detection:** Observations with low overall proximity scores might be outliers.
+- **Missing Data Imputation:** Proximities can be used to impute missing values based on similar cases.
+
+# Success Metrics for Clustering
+
+Evaluating the success of clustering, particularly in unsupervised learning where true labels are not available, relies on various metrics and methods designed to measure the quality of the clusters formed. These metrics assess different aspects of the clusters, such as their compactness, separation, and consistency with any known structures or patterns in the data. Here are some common methods and metrics for evaluating clustering performance:
+  
+1. Silhouette Coefficient: It is a measure of how similar an object is to its own cluster compared to other clusters. The values range from -1 to 1 , where a high value indicates that the object is well matched to its own cluster and poorly matched to neighboring clusters. If the average silhouette score for all points is close to 1 , it indicates a good clustering.
+2. Davies-Bouldin Index: It measures the average similarity between each cluster and its most similar one, where similarity is the ratio of within-cluster distances to between-cluster distances. Lower values of the Davies-Bouldin Index indicate better clustering.
+3. Calinski-Harabasz Index (Variance Ratio Criterion): The index is the ratio of the sum of between-clusters dispersion and of withincluster dispersion for all clusters. Higher values generally indicate that the clusters are dense and wellseparated, which is desirable.
+4. Dunn Index: The Dunn Index is the ratio of the smallest distance between observations not in the same cluster to the largest intra-cluster distance. The goal is to maximize this value, which would indicate compact clusters that are far apart from each other.
+5. Adjusted Rand Index (ARI): If true labels are available (for instance, in a semi-supervised scenario or using a subset of labeled data), the Adjusted Rand Index can be used. It measures the similarity between two assignments, ignoring permutations and with chance normalization. ARI has a value that ranges from -1 to 1 , where 1 means that the clusters are identical to the true labels.
+6. Comparing with Known Structures: If there's prior knowledge about the data's structure, the results of clustering can be compared against this knowledge to assess how well the clustering has uncovered meaningful groupings.
+7. Visual Assessment: Visualizing the clusters using techniques like scatter plots, PCA, or t-SNE for dimensionality reduction can provide intuitive insights into the separation and coherence of the clusters, although this is more subjective.
+
+```{r}
+library(cluster)
+data(iris)
+iris_data <- iris[, -5] # Exclude the species column
+km_res <- kmeans(iris_data, 3) # Assuming 3 clusters
+silhouette_score <- silhouette(km_res$cluster, dist(iris_data))
+summary(silhouette_score)
+```
+**Average silhouette widths:** The values ${ }^{\circ} 0.4173199^{\circ},{ }^{\circ} 0.7981405^{\circ}$, and ${ }^{\prime} 0.4511051^{\prime}$ are the average silhouette widths for each of the three clusters, respectively. The silhouette width measures how similar an object is to its own cluster compared to other clusters. The values range from -1 to 1 , where:
+  
+- A value close to 1 indicates that the object is well matched to its own cluster and poorly matched to neighboring clusters. 
+- A value of 0 indicates that the object is on the border of two clusters. 
+- A value close to -1 indicates that the object may have been placed in the wrong cluster. 
+
+**Interpretation**:  
+  
+- The second cluster (average silhouette width of 0.7981405 ) is well-defined, with points in this cluster being, on average, much closer to each other than to points in other clusters. This cluster is the most cohesive and well-separated from others. 
+- The first and third clusters have lower average silhouette widths (0.4173199 and 0.4511051, respectively), indicating that while points are closer to others within the same cluster, the separation from points in other clusters is not as pronounced as in the second cluster. 
+- Overall, the second cluster is the most distinct and well-formed, whereas the first and third clusters might have more overlap or less clear separation. 
+ 
+**Individual Silhouette Widths**
+
+- Min., 1st Qu., Median, Mean, 3rd Qu., Max.: These statistics describe the distribution of individual silhouette widths across all points in the dataset.
+- Min (Minimum): The smallest silhouette width (0.02636) suggests that at least one unit is barely closer to its own cluster than to other clusters, indicating a potential outlier or a point that is on the border of two clusters. 
+- 1st Qu. (First Quartile) and 3rd Qu. (Third Quartile): $25 \%$ of the points have a silhouette width lower than 0.39115 , and $75 \%$ of the points have a silhouette width lower than 0.77552 , respectively. This shows a spread in how well points fit into their clusters. 
+- Median: Half of the points have a silhouette width less than 0.56231 , indicating that the median point is relatively well matched to its cluster. 
+- Mean: The average silhouette width across all points is 0.55282 , suggesting that, on average, points are reasonably well matched to their clusters. 
+- Max (Maximum): The highest silhouette width (0.85391) indicates a point that is very well matched to its own cluster and far from other clusters. 
+
+ 
+# Conclusion
+
+In this notebook, we explored the K-means clustering algorithm and its application to the Iris dataset. We also introduced the PAM algorithm, which uses medoids instead of centroids for clustering. Additionally, we demonstrated how Random Forest, a supervised learning algorithm, can be used for unsupervised learning tasks such as clustering by leveraging the proximity matrix. Clustering is a powerful tool for discovering patterns and structures within data, and these algorithms provide different approaches to uncovering hidden insights.
+
+Random Forest can handle a mix of numerical and categorical data and is robust to outliers. It can also handle missing values and maintain accuracy with large datasets. However, it may not perform well with high-dimensional data or data with complex relationships. It's important to consider the trade-offs and the specific characteristics of the dataset when choosing an algorithm for clustering.
+
+Random Forest's feature importance measures can also provide insights into which features are driving the clustering. This can be useful for understanding the underlying structure of the data and identifying important variables for further analysis.
+
+While Random Forest can handle large datasets, the computation of the proximity matrix can be resource-intensive for very large datasets.
+
+Using Random Forest for clustering is a creative approach that leverages the algorithm's natural structure to measure data similarity, providing a flexible and powerful way to perform unsupervised learning.

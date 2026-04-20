@@ -1,0 +1,660 @@
+---
+title: "<span style='color: red; font-size: 30px;'>Boosting</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+
+Boosting is a general ensemble learning technique where multiple weak learners (usually decision trees) are sequentially trained to improve the overall predictive performance.
+
+# Ensemble Learning
+
+Boosting, bagging, and Random Forests (RF) are all ensemble learning techniques that create a model by combining the predictions from multiple other models.
+
+**Bagging** is short for Bootstrap Aggregating. It involves creating multiple copies of the original training data set using bootstrap sampling (i.e., sampling with replacement), fitting a separate model (often decision trees) to each copy, and then combining the models' predictions. The aim is to reduce variance and avoid overfitting, making the ensemble model more robust than individual models.
+
+**Random Forests** is an extension of bagging that involves building a large number of decision trees that are de-correlated by using a random subset of features at each split in the tree-building process. RF combines the predictions of all the trees to make a final prediction, aiming to reduce both bias and variance.
+
+**Boosting** is also ensemble model but it's different than others: it is a sequential process where each subsequent model attempts to correct the errors made by the previous models. Unlike bagging and RF, where models are built independently, boosting builds models in a sequence where each model learns from the mistakes of its predecessors. This approach aims to reduce bias (and can also affect variance), making the ensemble more accurate by focusing on difficult to predict instances. Boosting has been found to perform better in many cases by building on the strengths of its component models and correcting their weaknesses.
+
+# Boosting
+
+Boosting is a general approach to machine learning that involves incrementally building an ensemble of models. The key idea is to train a sequence of weak learners (models that are only slightly better than random guessing) to make a series of predictions, and then combine the predictions to produce a final prediction. The weak learners are typically decision trees, but other types of models can also be used.
+
+Here's the core idea:
+  
+1. Start Simple: The algorithm begins with a simple, weak model that makes a rough prediction. 
+2. Focus on Errors: Subsequent models are trained to focus on the data points where the previous model made the largest errors. 
+3. Ensemble Power: Each new model attempts to "boost" the performance of the previous by correcting its errors. Finally, the predictions of all models are combined, usually through weighted averaging or majority voting, to give a final prediction.  
+
+The most popular boosting algorithms are AdaBoost, Gradient Boosting, and XGBoost.
+
+## Types of Boosting Models
+
+All boosting algorithms share the same core idea — sequential correction — but they differ in *how* they identify and correct errors:
+
+- **AdaBoost (Adaptive Boosting)**: The original practical boosting algorithm (Freund & Schapire, 1997). Works by **reweighting observations** — after each tree, misclassified observations receive higher weights so the next tree focuses on them. Uses exponential loss internally. Originally designed for binary classification, though extensions exist for regression and multiclass problems.
+
+- **Gradient Boosting Machines (GBM)**: Instead of reweighting observations like AdaBoost, GBM fits each new tree to the **negative gradient of a loss function** (the "pseudo-residuals"). This generalization means GBM works with *any* differentiable loss function — SSE for regression, log-loss for classification, and more. Introduced by Friedman (2001). We cover GBM in detail in the next section.
+
+- **XGBoost (Extreme Gradient Boosting)**: An optimized implementation of gradient boosting (Chen & Guestrin, 2016) that adds **L1/L2 regularization** directly to the objective function, uses approximate tree-learning algorithms for speed, and handles missing values natively. Became the dominant algorithm in Kaggle competitions due to its speed and accuracy. We cover XGBoost in a separate notebook.
+
+- **LightGBM**: Developed by Microsoft. The main innovation is **leaf-wise tree growth**: standard GBM grows trees **level by level** (every node at the same depth is split before moving deeper), but LightGBM always splits the single leaf with the highest potential gain, even if this makes the tree lopsided. The result is more accurate trees with fewer total splits. LightGBM also includes two speed optimizations: **Gradient-based One-Side Sampling (GOSS)** — skip training on observations whose gradients are near zero (they're already well-predicted, so they contribute little information) — and **Exclusive Feature Bundling (EFB)** — combine mutually exclusive sparse features into a single feature to reduce the number of columns the algorithm needs to scan. Together, these make LightGBM often significantly faster than XGBoost on large datasets while achieving similar accuracy.
+
+- **CatBoost**: Developed by Yandex. Addresses a subtle problem in standard GBM called **prediction shift**: when we compute pseudo-residuals for observation $i$, we use a model that was trained *on data that includes observation $i$*. This means the residuals are slightly too optimistic — the model has already "seen" the target values it's trying to correct. Over many boosting rounds, this leakage accumulates and causes overfitting. CatBoost fixes this with **ordered boosting**: for each observation, the pseudo-residual is computed using only trees that were trained *without that observation*, eliminating the leakage. CatBoost also handles **categorical features natively** — instead of requiring one-hot encoding, it computes target-based statistics (similar to target encoding) with careful ordering to avoid introducing leakage there too. Known for working well out of the box with minimal tuning.
+
+XGBoost, LightGBM, and CatBoost are all engineering improvements on the GBM idea — they use the same gradient-based framework but with different optimizations for speed, regularization, and data handling. In this notebook, we focus on GBM.
+
+# Gradient Boosting Machines (GBM)
+
+In the simple boosting example we will code below, we fit trees to **residuals** — the difference between the actual values and our current predictions. This works well for regression with squared error loss. But what if we want to use a different loss function, such as absolute error for robust regression, or log-loss for classification? The concept of "residuals" doesn't naturally extend to those settings.
+
+This is where the name **"gradient" boosting** comes from. It turns out that fitting trees to residuals is actually a special case of something more general: **gradient descent in function space**.
+
+## Why is it called "Gradient" Boosting?
+
+Let's see this connection explicitly. Suppose we're doing regression and our loss function is the familiar sum of squared errors:
+
+$$
+L = \sum_{i=1}^{n}(y_i - \hat{y}_i)^2
+$$
+
+In GBM, we compute the gradient **for each observation separately** — these per-observation gradients are called **pseudo-residuals**. Taking the negative gradient of the loss with respect to a single prediction $\hat{y}_i$:
+
+$$
+-\frac{\partial L}{\partial \hat{y}_i} = -\frac{\partial (y_i - \hat{y}_i)^2}{\partial \hat{y}_i} = -(-2)(y_i - \hat{y}_i) = 2(y_i - \hat{y}_i)
+$$
+
+That's just **2 times the residual**! The constant 2 doesn't matter — it gets absorbed by the learning rate (shrinkage parameter $h$). So the pseudo-residual is proportional to $y_i - \hat{y}_i$, which is the ordinary residual. When we fit a tree to the residuals, we are — without realizing it — fitting a tree to the negative gradient of the SSE loss. Each new tree points in the direction that reduces the loss the fastest.
+
+::: {.callout-note}
+## The key insight
+
+**Residuals are just a special case of negative gradients.** For MSE loss, the negative gradient happens to equal the residual. GBM generalizes this idea: instead of always fitting to residuals, it fits each new tree to the **negative gradient of whatever loss function you choose**. This is what makes it so flexible — you can plug in:
+
+- **Squared error** ($L = \sum(y_i - \hat{y}_i)^2$) → negative gradient $\propto$ residual → standard regression
+- **Absolute error** ($L = |y - \hat{y}|$) → negative gradient = sign of residual → robust regression
+- **Log-loss / deviance** ($L = -[y\log(\hat{p}) + (1-y)\log(1-\hat{p})]$) → negative gradient = $y_i - \hat{p}_i$ → classification
+
+The algorithm always works the same way: (1) compute the negative gradient of the loss, (2) fit a tree to it, (3) take a small step in that direction. The loss function is the only thing that changes.
+:::
+
+Think of it like walking downhill in the mountains. At each step, you look around and find the steepest direction downward (the negative gradient), then take a step in that direction. In GBM, each tree is one "step," and the loss function defines the "landscape" you're walking on. The shrinkage parameter $h$ (also called the learning rate) controls how big each step is — smaller steps are slower but less likely to overshoot the bottom.
+
+Now that we understand *why* it's called gradient boosting, let's write out the algorithm formally.
+
+## The GBM Algorithm
+
+The general gradient boosting algorithm works as follows:
+
+1. **Initialize the model** with a simple prediction — typically the average of the target variable: $\hat{f}_0(x) = \bar{y}$.
+2. **For each iteration** $t = 1, 2, \ldots, B$:
+    a. Compute the **pseudo-residuals** — the negative gradient of the loss function for each observation: $r_i^{(t)} = -\frac{\partial L(y_i, \hat{f}(x_i))}{\partial \hat{f}(x_i)}$
+    b. **Fit a tree** $h_t(x)$ to the pseudo-residuals $r_i^{(t)}$.
+    c. **Update the model** by adding a shrunken version of the new tree: $\hat{f}_t(x) = \hat{f}_{t-1}(x) + \eta \cdot h_t(x)$, where $\eta$ is the learning rate (shrinkage).
+3. **Output** the final ensemble: $\hat{f}(x) = \hat{f}_0(x) + \eta \sum_{t=1}^{B} h_t(x)$.
+
+For **SSE loss** (the case we'll code below), the pseudo-residuals in step 2a simplify to the ordinary residuals $r_i = y_i - \hat{y}_i$, and the algorithm reduces to: fit a tree to the residuals, add it to the ensemble, repeat. This is the simplest and most intuitive version of gradient boosting.
+
+::: {.callout-note}
+## Why "pseudo"-residuals?
+
+They're called **pseudo**-residuals because they are only *actual* residuals in the special case of SSE loss. For squared error, the negative gradient $-\partial L / \partial \hat{y}_i = 2(y_i - \hat{y}_i)$ is proportional to the ordinary residual $y_i - \hat{y}_i$, so the two terms are interchangeable. But for **any other loss function**, the negative gradient is *not* a residual in the traditional sense:
+
+- For **absolute error** loss, the negative gradient is $\text{sign}(y_i - \hat{y}_i)$ — just +1 or −1, not the actual difference between observed and predicted.
+- For **log-loss** (classification), the negative gradient is $y_i - \hat{p}_i$ — the difference between the true label (0 or 1) and the predicted probability. That's not a "residual" in any regression sense.
+
+The word **"pseudo"** signals that this quantity *plays the same role* as a residual (it's what the next tree fits to), but it's really the negative gradient of the loss function — which only happens to coincide with the actual residual when the loss is squared error.
+:::
+
+::: {.callout-note}
+## Everything happens on the training data
+
+Notice that the entire GBM algorithm operates on the **training data only**. In every iteration: the pseudo-residuals are computed from the current training-data predictions, the new tree is fit to the training data, and the model is updated using training-data predictions. There is **no test set** anywhere inside the algorithm.
+
+This is precisely why GBM can overfit: each new tree reduces the training error, but at some point it starts fitting noise rather than signal. The training error will keep decreasing as you add more trees — it will *never* tell you to stop. That's why you need an **external mechanism** (cross-validation, a holdout set, or OOB estimation) to decide when to stop adding trees. We cover these stopping methods in the "How many trees?" section below.
+
+This is also the subtle leakage that CatBoost's "ordered boosting" addresses: since observation $i$'s pseudo-residual is computed from a model that was trained on data *including* observation $i$, the residuals are slightly too optimistic — and this bias accumulates over many boosting rounds.
+:::
+
+::: {.callout-note}
+## How GBM differs from Bagging and Random Forest
+
+- **Bagging/RF**: Trees are built **independently** on bootstrap samples, then averaged. The goal is to reduce **variance** by averaging many noisy, low-bias trees.
+- **GBM**: Trees are built **sequentially**, each one correcting the mistakes of the previous ensemble. The goal is to reduce **bias** by iteratively improving the fit. This also means GBM is more sensitive to hyperparameters — the number of trees ($B$), the learning rate ($\eta$), and the tree depth all interact. Too many trees or too large a learning rate leads to overfitting; too few or too small leads to underfitting. We'll see how to tune these below.
+
+Another key difference: GBM works with **any differentiable loss function** (SSE, absolute error, log-loss, etc.), while bagging/RF are typically tied to variance reduction via averaging. This flexibility is what makes GBM so widely applicable.
+:::
+
+Let's now implement this algorithm step by step for a regression problem with SSE loss, where the pseudo-residuals are simply the ordinary residuals.
+
+# Example: GB for regression tree
+
+We'll implement gradient boosting from scratch on a simple 1D problem: a noisy sine curve. This lets us *see* how boosting progressively captures the true pattern by stacking corrections on top of each other.
+
+```{r, message=FALSE, warning=FALSE}
+library(rpart)
+library(ggplot2)
+library(dplyr)
+library(gbm)
+
+# Simulate data: y = sin(x) + noise
+n <- 300
+set.seed(1)
+x <- sort(runif(n) * 2 * pi)
+y <- sin(x) + rnorm(n) / 4
+df <- data.frame("x" = x, "y" = y)
+plot(df$x, df$y, ylab = "y", xlab = "x", col = "grey")
+```
+
+## Step 1: Initialize the model
+
+We set up the storage and fit our first tree. The `boost` matrix has one column per tree — each column will hold that tree's shrunken predictions, and the final ensemble prediction for each observation will be the row sum. We start with `h = 1.8` (deliberately too large — we'll see later that a learning rate > 1 amplifies each tree's contribution and causes overfitting).
+
+```{r}
+# boost matrix: n rows (observations) x B columns (trees)
+# Each column will store one tree's shrunken contribution: h * predictions
+B = 100
+h = 1.8 # shrinkage (learning rate) — intentionally too large here
+boost <- matrix(0, nrow = n, ncol = B)
+
+# Fit the first tree to y (this is our f_0 — the initial model)
+in_model <- rpart(y ~ x, data = df) 
+yp <- predict(in_model) # in-sample predictions on the training data
+
+# Store the first tree's shrunken contribution
+boost[ ,1] <- yp * h
+
+# The blue staircase shows what a single tree captures — a rough approximation
+plot(df$x, df$y, ylab = "y", xlab = "x", col = "grey")
+lines(df$x, yp, type = "s", col = "blue", lwd = 3)
+```
+
+The single tree captures the broad shape but misses the detail. Each subsequent tree will fit the **residuals** — what the current ensemble got wrong — so it specifically targets the areas where predictions are poorest.
+
+## Step 2: Iterations 
+
+In each iteration: (1) compute the residuals $r_i = y_i - \hat{y}_i$ (what we got wrong), (2) fit a new tree to those residuals, (3) multiply its predictions by `h` and store them, (4) update the residuals by subtracting the new tree's contribution. After `B` iterations, the `boost` matrix contains one column per tree, each holding that tree's shrunken correction.
+
+```{r}
+df$yr <- df$y - h * yp # Residuals after the first tree
+
+# Boosting loop for t times (trees)
+for (t in 2:B) {
+  
+  # Fit a regression tree to the residuals
+  fit <- rpart(yr ~ x, data = df) 
+  yp <- predict(fit, newdata = df)
+  
+  # Store the predictions
+  boost[, t] <- h * yp 
+  
+  # Update the residuals
+  df$yr <- df$yr - h * yp 
+}
+
+str(boost)
+```
+
+## Step 3: Combine the predictions
+
+The final prediction is the sum of all trees' contributions: $\hat{y}_i = \sum_{t=1}^{M} h \cdot h_t(x_i)$. In our `boost` matrix, this is simply the row-wise sum of the first `M` columns. Here we use only `M = 6` trees to show the early-stage ensemble — it's already smoother than a single tree, but still rough.
+
+```{r}
+# viz(M) sums the first M columns of the boost matrix to get the ensemble prediction
+viz <- function(M) {
+  yhat <- apply(boost[, 1:M], 1, sum) # Row sums = ensemble prediction using M trees
+  plot(df$x, df$y, ylab = "", xlab = "", col = "grey")
+  lines(df$x, yhat, type = "s", col = "red", lwd = 3)
+}
+
+# Using only 6 of the 100 trees
+viz(6)
+```
+
+Let's wrap Steps 1–3 into a reusable function. The key parameter is `M` — how many of the `B` trained trees to actually use for prediction. This lets us explore the effect of early stopping: use fewer trees (`M < B`) to see underfitting, or all of them to risk overfitting.
+
+```{r}
+boosting <- function(B, M, h, df) {
+  if (M > B) stop("M should be less than or equal to B")
+  
+  n <- nrow(df)
+  boost <- matrix(0, nrow = n, ncol = B) # B trees
+  model <- rpart(y ~ x, data = df) 
+  yp <- predict(model, df) # using the entire data
+  
+  boost[, 1] <- yp * h # Store the first predictions 
+  df$yr <- df$y - h * yp #First iteration error
+  
+  for (t in 2:B) {
+    fit <- rpart(yr ~ x, data = df) 
+    yp <- predict(fit, newdata = df)
+    boost[ ,t] <- yp * h 
+    df$yr <- df$yr - h * yp 
+  }
+  
+  yhat <- apply(boost[, 1:M], 1, sum) # This is predicted y for depth M
+  return(yhat)
+
+}
+```
+
+With `h = 1.8` (learning rate > 1), each tree's contribution is *amplified* rather than shrunk. The model over-corrects at every step, chasing noise in the training data. The jagged red line below shows classic overfitting:
+
+```{r}
+# Run
+yhat <- boosting(100, 100, 1.8, df)
+
+# Plot
+plot(df$x, df$y, ylab = "y", xlab = "x", col = "grey")
+lines(df$x, yhat, type = "s", col = "red", lwd = 3)
+```
+
+## Hyperparameters
+
+**Effect of the learning rate `h`:** Small `h` means slow, cautious learning — each tree contributes a tiny correction, producing smoother curves. Large `h` means aggressive corrections that chase noise and overfit. Compare the progression from `h = 0.2` (smooth) to `h = 1.4` (jagged):
+
+```{r}
+#| layout-ncol: 2
+for (i in c(0.2, 0.5, 1, 1.4)) {
+  yhat <- boosting(100, 100, i, df)
+  plot(df$x, df$y, ylab = "y", xlab = "x", col = "grey",
+       main = paste("h =", i))
+  lines(df$x, yhat, type = "s", col = "red", lwd = 3)
+}
+```
+
+**Effect of the number of trees `M`:** With a small learning rate (`h = 0.03`), we need many trees to build up a good prediction. Too few trees = underfitting (too smooth), more trees = better fit. But eventually, adding more trees leads to overfitting — the curve starts chasing individual data points:
+
+```{r}
+#| layout-ncol: 2
+for (i in c(2, 15, 50, 200)) {
+  yhat <- boosting(200, i, 0.03, df)
+  plot(df$x, df$y, ylab = "y", xlab = "x", col = "grey",
+       main = paste("M =", i))
+  lines(df$x, yhat, type = "s", col = "blue", lwd = 3)
+}
+```
+
+# GBM in R
+
+In R, we can use the `gbm` package to fit a gradient boosting model. The `gbm` package provides a flexible and powerful interface for fitting gradient boosting models to a wide range of problems. It allows for a high degree of customization through various hyperparameters, making it adaptable to a wide range of use cases.
+
+`gbm()` function has many arguments.  Please see the documentation for more details.  Here are the defult values for some of the arguments:
+
+![](https://cdn.mathpix.com/snip/images/98fZ18YVj6h1nMELaKtzrFypnJrXnSgUsY8QKrhBYCc.original.fullsize.png)
+
+We need to tune the boosting applications with `gbm()`. There are two groups of tuning parameters: boosting parameters and tree parameters.
+  
+- **Boosting parameters**: The number iterations (`n.trees =100`) and learning rate (`shrinkage=0.1`). 
+- **Tree parameters**: The maximum depth of each tree (`interaction.depth=1`) and the minimum number of observations in the terminal nodes of the trees (`n.minobsinnode=10`). 
+
+## How many trees? Selecting the optimal number of iterations
+
+The most important hyperparameter in GBM is the **number of trees** ($B$). Too few trees = underfitting (the model hasn't learned enough). Too many trees = overfitting (the model starts memorizing noise). The `gbm` package offers three built-in methods to find the sweet spot:
+
+**1. K-fold cross-validation (`cv.folds`)**
+
+The most reliable method. Set `cv.folds = 5` (or 10), and `gbm` will:
+
+- Split the data into $k$ folds.
+- For each fold, fit a GBM model on the other $k-1$ folds and track the prediction error at every iteration (1, 2, 3, ..., `n.trees`).
+- Average the error across folds to get a CV error curve.
+- The optimal number of trees is where the CV error is minimized.
+
+After finding the best iteration, `gbm` fits one final model on *all* the data using that number of trees. You can access the CV errors via `boos$cv.error` and find the best iteration with `which.min(boos$cv.error)`.
+
+**2. Hold-out test set (`train.fraction`)**
+
+A simpler but less robust alternative. Set `train.fraction = 0.8`, and `gbm` will use 80% of the data for training and reserve 20% as a validation set. It tracks the validation error at each iteration, and you pick the iteration with the lowest validation error. Faster than CV but wastes data and gives a noisier estimate (since it depends on a single random split).
+
+**3. OOB estimation (`bag.fraction`)**
+
+When `bag.fraction < 1` (e.g., 0.5), each tree is fit on a **random subsample** of the training data rather than the full dataset. This is called **stochastic gradient boosting** — the randomness acts as regularization, similar to how bagging reduces variance. The observations *not* used for a given tree can estimate that tree's contribution, reported as `oobag.improve`. This gives a rough estimate of the optimal iteration, but it's generally less reliable than CV.
+
+::: {.callout-note}
+## In practice
+
+Use `cv.folds` for the most trustworthy estimate of the optimal number of trees. Use `bag.fraction < 1` as a **regularization technique** regardless of which stopping method you choose — it reduces overfitting by introducing randomness into the gradient descent. A common choice is `bag.fraction = 0.5` to `0.8`.
+:::
+
+[You can find more information here](https://cran.r-project.org/web/packages/gbm/vignettes/gbm.pdf). 
+
+### Example without hyperparameter tuning
+
+Here's an example of how to use the `gbm` package with internal CV to select the optimal number of trees. **We are not tuning the other hyperparameters here** — we pick fixed values for `shrinkage`, `interaction.depth`, etc., and only let CV determine how many trees to use.
+
+```{r}
+library(ISLR)
+library(gbm)
+
+data(Hitters)
+df <- Hitters[complete.cases(Hitters$Salary), ]
+df$Salary <- log(df$Salary)
+boos <- gbm(Salary ~., distribution = "gaussian", n.trees = 5000,
+            interaction.depth = 3, shrinkage = 0.01, data = df,
+            bag.fraction = 0.5,
+            cv.folds = 10)
+boos
+```
+
+::: {.callout-note}
+## Reading the output
+
+Let's break down what the model tells us and what each parameter choice means:
+
+- **`distribution = "gaussian"`**: We're using SSE loss (squared error), which is the standard choice for regression problems. In the GBM framework, "gaussian" means the pseudo-residuals are just the ordinary residuals.
+- **`n.trees = 5000`**: We allowed the algorithm to build up to 5,000 trees. This is an upper bound — we don't necessarily use all of them.
+- **`interaction.depth = 3`**: Each tree has a maximum depth of 3 splits, meaning each tree can capture up to 3-way interactions between variables. Deeper trees = more complex individual learners.
+- **`shrinkage = 0.01`**: A very small learning rate. Each tree contributes only 1% of its prediction to the ensemble. This is slow but careful — it requires more trees but typically gives better results than a large learning rate.
+- **`bag.fraction = 0.5`**: Stochastic GBM — each tree is fit on a random 50% subsample of the training data. This adds regularization and reduces overfitting.
+- **`cv.folds = 10`**: 10-fold cross-validation is used to estimate the optimal number of trees.
+- **"The best cross-validation iteration was 939"**: Of the 5,000 trees we allowed, CV found that the prediction error was minimized at iteration 939. After that, adding more trees starts to *increase* the error (overfitting). So the effective model uses only 939 trees.
+- **"19 predictors of which 19 had non-zero influence"**: All 19 variables in the Hitters dataset were used in at least one split somewhere in the 939-tree ensemble.
+:::
+
+Now let's visualize how the CV error evolves as trees are added:
+
+```{r}
+gbm.perf(boos, method = "cv")
+```
+
+::: {.callout-note}
+## Reading the `gbm.perf` plot
+
+This plot shows the error at each iteration (number of trees):
+
+- **Black line**: Training error — always decreasing because the model keeps fitting the training data better with each additional tree.
+- **Green line**: CV error — decreases at first (the model is learning useful patterns), then flattens, and eventually starts **increasing** (overfitting). The gap between the black and green lines is the overfitting gap.
+- **Blue dashed vertical line**: The optimal number of iterations — where the green CV error is minimized. This is the point where we should stop adding trees.
+
+The function also returns the optimal iteration number (939 in our case).
+:::
+
+We can also extract and inspect the CV error values directly:
+
+```{r}
+plot(boos$cv.error, type = "l")
+best <- which.min(boos$cv.error)
+best
+boos$cv.error[best]
+```
+
+`which.min(boos$cv.error)` finds the iteration with the lowest CV error — iteration **939**. The value `boos$cv.error[939]` = **0.2063** is the estimated **test MSE** (mean squared error on held-out data) for the model stopped at that iteration. Since we log-transformed salary, this is the MSE on the log-salary scale. This is the best estimate of how well this GBM configuration would perform on unseen data.
+
+
+## Example with hyperparameter tuning 
+
+In the previous example, we fixed the hyperparameters (`shrinkage = 0.01`, `interaction.depth = 3`, etc.) and only let CV choose the number of trees. But how do we know those were good choices? We need to **tune all hyperparameters together** using a grid search.
+
+The strategy: try many combinations of hyperparameters, use 10-fold CV within each combination to find its optimal number of trees, and pick the combination with the lowest CV error (RMSE).
+
+First, we create a grid of hyperparameter combinations to try:
+
+```{r}
+# create hyperparameter grid
+grid <- expand.grid(
+  shrinkage = c(0.01, 0.1, 0.3),         # slow, moderate, fast learning
+  interaction.depth = c(1, 3, 5),          # stumps, moderate, complex trees
+  n.minobsinnode = c(5, 10, 15),           # small to large terminal nodes
+  bag.fraction = c(.65, .8, 1),            # stochastic to full data
+  optimal_trees = 0,                       # placeholder for results
+  min_RMSE = 0                             # placeholder for results
+)
+
+# total number of combinations
+nrow(grid)
+```
+
+That's `r nrow(grid)` combinations. For each one, we fit a GBM with 10-fold CV and record the best iteration and its CV RMSE:
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+for (i in 1:nrow(grid)) {
+  
+  gbm.tune <- gbm(
+    formula = Salary ~ .,
+    distribution = "gaussian",
+    data = df,
+    n.trees = 2000,
+    interaction.depth = grid$interaction.depth[i],
+    shrinkage = grid$shrinkage[i],
+    n.minobsinnode = grid$n.minobsinnode[i],
+    bag.fraction = grid$bag.fraction[i],
+    cv.folds = 10,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+  # add min training error and trees to grid
+  grid$optimal_trees[i] <- which.min(gbm.tune$cv.error)
+  grid$min_RMSE[i] <- sqrt(min(gbm.tune$cv.error))
+  
+}
+
+grid %>% 
+  arrange(min_RMSE) %>%
+  head(10)
+```
+
+::: {.callout-note}
+## Reading the grid search results
+
+Let's look at what the top 10 configurations tell us:
+
+- **The winner** (row 1): `shrinkage = 0.10`, `interaction.depth = 3`, `n.minobsinnode = 5`, `bag.fraction = 0.65`, needing only **137 trees** with RMSE = **0.450**. A moderate learning rate with moderately complex trees.
+- **The shrinkage–trees trade-off is clear**: `shrinkage = 0.01` needs ~600–1500 trees (slow learner, many small steps), `shrinkage = 0.10` needs ~56–520 trees, and `shrinkage = 0.30` needs only 38 trees (fast learner, few big steps). Smaller learning rate = more trees = slower training.
+- **Stochastic GBM helps**: Most top configurations have `bag.fraction < 1` (0.65 or 0.80), confirming that subsampling acts as effective regularization.
+- **The RMSE differences are small**: The top 10 range from ~0.450 to ~0.461. When configurations are this close, the ranking can change if you re-run with a different random seed for the CV folds. In practice, this means any of the top configurations would give similar performance — don't over-interpret small RMSE differences.
+:::
+
+### Fitting the final model
+
+Now we take the winning hyperparameters and fit the final model on **all** the data. We set `cv.folds = 0` because we already know the optimal number of trees from the grid search — no need to re-do CV:
+
+```{r}
+best_params <- grid %>% 
+  dplyr::arrange(min_RMSE) %>%
+  head(1)
+
+# train GBM model
+gbm.final <- gbm(
+  formula = Salary ~ .,
+  distribution = "gaussian",
+  data = df,
+  n.trees = best_params$optimal_trees,
+  interaction.depth = best_params$interaction.depth,
+  shrinkage = best_params$shrinkage,
+  n.minobsinnode = best_params$n.minobsinnode,
+  bag.fraction = best_params$bag.fraction, 
+  train.fraction = 1,
+  cv.folds = 0,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+
+gbm.final
+```
+
+### Estimating out-of-sample performance
+
+We have a tuned model, but there's a problem: we used the **entire dataset** for both tuning (grid search CV) and fitting the final model. We don't have a true held-out test set to estimate real-world performance.
+
+To get an honest estimate, we run a **bootstrap evaluation**: repeatedly split the data into train/test using bootstrap sampling, fit the tuned GBM on the training set, predict on the test set, and compute RMSPE (Root Mean Squared Prediction Error). This gives us a distribution of out-of-sample performance:
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+rmspe <- c()
+
+for (i in 1:100) {
+     
+  ind <- unique(sample(1:nrow(df), nrow(df), replace = TRUE))  
+  train <- df[ind, ]
+  test <- df[-ind, ]
+  
+  gbm.final <- gbm(
+    formula = Salary ~ .,
+    distribution = "gaussian",
+    data = train,
+    n.trees = 1000,
+    interaction.depth = best_params$interaction.depth,
+    shrinkage = best_params$shrinkage,
+    n.minobsinnode = best_params$n.minobsinnode,
+    bag.fraction = best_params$bag.fraction, 
+    train.fraction = 1,
+    cv.folds = 0,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+  
+  yhat <- predict(gbm.final, test, n.trees = best_params$optimal_trees)
+  rmspe[i] <- sqrt(mean((test$Salary - yhat)^2))
+
+}
+```
+
+```{r}
+mean(rmspe)
+plot(rmspe, col = "blue")
+abline(h = mean(rmspe), col = "red")
+abline(h = mean(rmspe) + 2*sd(rmspe), col = "green", lty = 2)
+```
+
+Each blue dot is the RMSPE from one bootstrap split. The **red line** is the average RMSPE across all 100 splits — our best estimate of how well this tuned GBM would perform on truly unseen data. The **green dashed lines** show ±2 standard deviations, giving a sense of the variability in performance across different random splits. Since we're predicting log(Salary), this RMSPE is on the log-salary scale.
+
+# Variable Importance
+
+In Week 7 (Random Forest), we learned about **MDI** (Mean Decrease in Impurity) and **MDA** (Mean Decrease in Accuracy) as measures of variable importance. GBM uses a similar concept. The default importance measure in the `gbm` package is called **relative influence**, which is essentially the same idea as MDI: for each variable, sum up the total reduction in the loss function (squared error for regression) attributable to splits on that variable across all trees in the ensemble.
+
+The `summary.gbm()` function computes and plots these importance scores:
+
+```{r}
+summary.gbm(gbm.final)
+```
+
+The output has two parts: a **bar plot** (ranking variables from most to least important) and a **table** with `var` (variable name) and `rel.inf` (relative influence, normalized so all values sum to 100%). Variables like `CAtBat` and `CRuns` — career-level batting statistics — dominate, suggesting that a player's career track record is the strongest predictor of salary.
+
+The `vip` package provides a cleaner version of the same importance bar chart:
+
+```{r, warning=FALSE, message=FALSE}
+library(vip)
+vip::vip(gbm.final)
+```
+
+## Partial Dependence Plots
+
+Variable importance tells us **which** variables matter most, but not **how** they affect the prediction. Do more career runs increase predicted salary? By how much? Does the effect plateau?
+
+**Partial Dependence Plots (PDPs)** answer these questions. A PDP shows the marginal effect of a single variable on the predicted outcome, averaging over all other variables. For each value of the variable of interest, it asks: "If every player had this value of `CRuns` (but kept all their other stats), what would the average predicted salary be?"
+
+```{r}
+plot(gbm.final, i = "CRuns")
+```
+
+::: {.callout-note}
+## Reading the PDP
+
+The x-axis is the variable value (`CRuns` — career runs), and the y-axis is the predicted log(Salary), averaged across all observations. The curve shows:
+
+- **Steep rise at low values**: Players with few career runs have much lower predicted salaries. Each additional career run matters a lot early on.
+- **Plateau at high values**: After roughly 800–1000 career runs, the curve flattens — additional runs have diminishing returns for salary prediction.
+
+This makes intuitive sense: the difference between 0 and 500 career runs is huge (rookie vs. established player), while the difference between 1000 and 1500 is less meaningful for salary.
+
+PDPs are model-agnostic — you can compute them for any model, not just GBM. We covered the mathematical details in Week 7 (Random Forest notebook).
+:::
+
+# External Validation Approach
+
+In the previous sections, we relied on `gbm`'s **internal CV** (`cv.folds`) to both tune hyperparameters and estimate performance. This is convenient, but there's an alternative: do your own **external validation loop**, manually splitting the data into train/test, fitting GBM, and evaluating — giving you full control over the entire process.
+
+The idea: create a grid of hyperparameter combinations (depth, number of trees, shrinkage), and for each combination, run multiple bootstrap train/test splits to estimate the out-of-sample RMSPE. This simultaneously tunes hyperparameters *and* provides honest test performance estimates.
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+library(gbm)
+
+# Hyperparameter grid
+h <- seq(0.01, 0.1, 0.01)        # shrinkage: 10 values from 0.01 to 0.10
+B <- c(100, 300, 500, 750, 900)   # number of trees used for prediction
+D <- 1:2                           # interaction depth: stumps vs. 2-level trees
+
+grid <- as.data.frame(expand.grid(D, B, h))
+colnames(grid) <- c("D", "B", "h")
+grid$rmspe <- rep(0, nrow(grid))
+
+for (i in 1:nrow(grid)) { 
+  
+  val_mse <- c()
+  
+  for (j in 1:20) { try({
+    set.seed(j)
+    ind <- sample(nrow(df), nrow(df), replace = TRUE)
+    train <- df[ind, ]
+    val <- df[-ind, ]
+   
+    boos <- gbm(
+      Salary ~ .,
+      distribution = "gaussian",
+      n.trees = 1000,                    # always train 1000 trees
+      interaction.depth = grid[i, 1],    # D from grid
+      shrinkage = grid[i, 3],            # h from grid
+      bag.fraction = 0.8,
+      data = train
+    )
+    
+    # Predict using only B trees (early stopping at different points)
+    yhat <- predict(boos, val, n.trees = grid[i, 2])
+    val_mse[j] <- sqrt(mean((val$Salary - yhat)^2))
+    
+  }, silent = TRUE)
+    
+  }
+
+  grid$rmspe[i] <- mean(val_mse)
+}
+
+res <- arrange(grid, rmspe)
+head(res)
+```
+
+::: {.callout-note}
+## Understanding the external approach
+
+**How the grid works:** We always train GBM with `n.trees = 1000` (a large number), but at prediction time we use only `B` trees from the grid (100, 300, 500, 750, or 900). This is a way to search for the optimal early-stopping point externally — instead of relying on CV error within `gbm`, we evaluate on a held-out test set.
+
+**The nested loop:** The outer loop iterates over grid configurations (`r nrow(grid)` combinations). The inner loop runs 20 bootstrap splits for each configuration, computing the average RMSPE across splits. The `try()` wrapper silently handles any configurations that fail (e.g., if the shrinkage is too large for the number of trees).
+
+**Reading the results:** The `head(res)` output shows the top configurations ranked by RMSPE. You can compare these to the internal CV results from the previous section.
+:::
+
+## Internal vs. External: When to use which?
+
+| | **Internal CV** (`cv.folds`) | **External validation** |
+|---|---|---|
+| **Speed** | Faster — one `gbm()` call per grid row | Much slower — 20 bootstrap fits per grid row |
+| **Convenience** | Built-in, minimal code | Manual loops, more code |
+| **Flexibility** | Limited to `gbm`'s built-in options | Full control over split strategy |
+| **Test performance** | CV error is a *proxy* — may be optimistic if you tune many configs | Bootstrap gives direct test RMSPE |
+| **When to use** | Most practical for routine work | When you need full control or want to compare GBM against other methods on the same splits |
+
+In practice, the internal CV approach is usually sufficient and much faster. The external approach becomes valuable when you need to **compare GBM against other models** (e.g., Random Forest, linear regression) on exactly the same train/test splits — something `gbm`'s internal CV can't do.
+
+::: {.callout-note}
+## Can GBM be parallelized?
+
+GBM trees are **sequential by nature** — each tree depends on the residuals from the previous one, so you **cannot** parallelize the tree-building within a single GBM model. This is fundamentally different from Random Forest, where trees are independent and can be built in parallel.
+
+However, there are two things you *can* parallelize:
+
+1. **Internal CV folds**: The `n.cores` parameter in `gbm()` parallelizes the k-fold CV computation (each fold is independent). Setting `n.cores = NULL` uses all available cores.
+2. **External grid search**: The outer loop over grid configurations can be parallelized using `doParallel`/`foreach`, since each configuration is independent. This can dramatically speed up the external approach.
+
+The sequential nature of GBM is one reason **XGBoost** was developed — it uses clever system optimizations (cache-aware access, approximate split finding) to make the inherently sequential process as fast as possible.
+:::

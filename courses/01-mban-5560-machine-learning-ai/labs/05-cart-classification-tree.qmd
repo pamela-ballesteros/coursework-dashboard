@@ -1,0 +1,793 @@
+---
+title: "<span style='color: red; font-size: 30px;'>Classification Tree - Fundamentals</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+Classification and Regression Trees (CART) offer a versatile framework for addressing both categorical and continuous target variables within the same methodological approach. By systematically dividing the feature space into increasingly homogeneous subsets, CART models can predict outcomes by learning simple decision rules inferred from the data features. This approach is particularly useful for understanding the relationships between the features and the target, as well as for identifying the most important features for prediction.
+
+Single trees are the building blocks of more complex tree-based models, such as random forests and gradient boosting machines. They are also used as a standalone method for classification and regression tasks. In this notebook, we'll explore the fundamentals of classification trees, including the impurity measure, recursive partitioning, and variable importance. We'll also implement a simple recursive partitioning algorithm to build a decision tree from scratch and train a tree model using the `rpart` package in R.
+
+# Data
+
+Let's use a simple example given by [freakonometrics](https://freakonometrics.hypotheses.org/52776), which uses a dataset (from Gilbert Saporta) that reports about heart attacks and decease (our binary variable) in an ER.
+
+![](https://cdn.mathpix.com/snip/images/RftNfYcxu_uT0xNXmxkJcfcWGj7b7sgpIdLoJ-qvANw.original.fullsize.png)
+
+```{r}
+# Data
+myocarde = read.table("myocarde.csv",
+                      head = TRUE, sep = ";")
+str(myocarde)
+```
+Recode the binary variable `PRONO` to 1/0 and drop the original column. Here, `SURVIE` (survived) is coded as 1 and `DECES` (deceased) as 0.
+
+```{r}
+df <- myocarde[ ,-ncol(myocarde)]
+df$y <- ifelse(myocarde$PRONO == "SURVIE", 1, 0)
+```
+
+# Gini index - Impurity measure
+
+## Why do we need an impurity measure?
+
+Before we can build a tree, we need a way to measure how "mixed" or "impure" a group of labels is. The whole point of splitting is to create child groups that are **more pure** (more homogeneous) than the parent. But how do we quantify "purity"?
+
+Think of it this way: imagine a bag with 10 balls—5 red and 5 blue. If you reach in, grab one, and then try to guess its color based on the proportions you know, you'd be wrong about **half the time**. That bag is *maximally impure*. Now imagine a bag with 10 red balls and 0 blue. You'd never be wrong—that bag is *perfectly pure*. We need a number that captures this: **0 when a group is pure, and high when it's maximally mixed.**
+
+There are several impurity measures used in practice (Gini impurity, entropy, classification error), but the CART algorithm uses **Gini impurity**.
+
+## The Gini impurity formula
+
+For a dataset $D$ with $C$ classes, the Gini impurity is defined as:
+
+$$
+\operatorname{Gini}(D)=1-\sum_{i=1}^C p_i^2
+$$
+
+where $p_i$ is the proportion of class $i$ in the dataset. Intuitively, $\sum p_i^2$ is the probability that if you randomly pick an observation and randomly guess its class (using the class proportions as your guessing strategy), you'd **guess correctly**. Subtracting from 1 gives you the probability of a **mismatch**—i.e., the impurity.
+
+::: {.callout-note}
+## Why $p_i^2$? — The squaring explained
+
+The $p_i^2$ term arises naturally from a **two-step random experiment**. Imagine you:
+
+1. **Randomly pick** an observation from the node — it belongs to class $i$ with probability $p_i$
+2. **Randomly guess** its class using the class proportions as your strategy — you guess class $i$ with probability $p_i$
+
+The probability of a correct guess *specifically for class $i$* is $p_i \times p_i = p_i^2$. Summing over all classes gives $\sum p_i^2$ — the total probability of a correct random match. Subtracting from 1 yields the probability of a **mismatch**, which is the impurity.
+
+Note also why we cannot simply use $\sum p_i$: it always equals 1 (probabilities must sum to 1), making it useless as a distinguishing measure. The squaring is what allows Gini to differentiate between a pure node ($\sum p_i^2 = 1 \Rightarrow$ Gini $= 0$) and a maximally impure one ($\sum p_i^2$ is minimized $\Rightarrow$ Gini is maximized).
+:::
+
+**Concrete example (C = 3 classes):** Suppose a node has 100 patients: 50 have condition A, 30 have condition B, and 20 have condition C.
+
+- $p_A = 0.5, \quad p_B = 0.3, \quad p_C = 0.2$
+- $\sum p_i^2 = 0.5^2 + 0.3^2 + 0.2^2 = 0.25 + 0.09 + 0.04 = 0.38$
+
+This 0.38 is the probability of guessing correctly. So:
+
+$$\text{Gini} = 1 - 0.38 = 0.62$$
+
+There's a **62% chance of misclassification**—the node is quite impure because the three classes are mixed together. Compare this to a pure node where all 100 patients have condition A: $\sum p_i^2 = 1.0^2 = 1.0$, so Gini = $1 - 1 = 0$. No chance of mismatch—perfect purity.
+
+**What about entropy?** Another common impurity measure is **entropy** (from information theory): $\text{Entropy}(D) = -\sum p_i \log_2(p_i)$. It captures the same idea—0 when pure, maximized when classes are evenly mixed—but through the lens of "information content" rather than misclassification probability. Some other tree-building algorithms use entropy (via *information gain*) as their splitting criterion, while **CART uses Gini**. In practice, both measures produce nearly identical trees because their curves are very similar in shape. Gini is slightly faster to compute (no logarithms), which is one reason CART chose it. You'll see Gini as the default in `rpart` and `scikit-learn`.
+
+## The binary case
+
+In a binary classification problem (two classes), the formula simplifies nicely. Let $p$ be the proportion of class 1 (e.g., survived). Then the proportion of class 0 is $(1-p)$, and:
+
+$$
+\operatorname{Gini}(D) = 1 - \left(p^2 + (1-p)^2\right) = 2p(1-p)
+$$
+
+Let's visualize this to build intuition. The plot below shows how Gini impurity changes as the proportion $p$ varies from 0 to 1:
+
+```{r, echo=FALSE}
+# Visualize Gini impurity as a function of p
+p <- seq(0, 1, by = 0.01)
+gini <- 2 * p * (1 - p)
+
+plot(p, gini, type = "l", lwd = 2, col = "blue",
+     xlab = "Proportion of Class 1 (p)",
+     ylab = "Gini Impurity",
+     main = "Gini Impurity: 2p(1-p)")
+abline(v = 0.5, lty = 2, col = "red")
+text(0.52, 0.48, "Maximum\nimpurity", col = "red", pos = 4, cex = 0.85)
+points(c(0, 0.5, 1), c(0, 0.5, 0), pch = 19, col = c("darkgreen", "red", "darkgreen"), cex = 1.5)
+text(0.02, 0.03, "Pure\n(all class 0)", col = "darkgreen", pos = 4, cex = 0.75)
+text(0.98, 0.03, "Pure\n(all class 1)", col = "darkgreen", pos = 2, cex = 0.75)
+```
+
+Key observations from the plot:
+
+- **Gini = 0** at the extremes ($p = 0$ or $p = 1$): the group is perfectly pure—all observations belong to one class.
+- **Gini = 0.5** at $p = 0.5$: maximally impure—a 50/50 split between classes. This is the worst case for a classifier.
+- The curve is symmetric: a group with 20% class 1 is equally impure as a group with 80% class 1.
+
+## Computing Gini on our data
+
+Now let's compute the Gini impurity for our target variable $y$ (survived vs. deceased):
+
+```{r}
+# What's the proportion of survived (y = 1)?
+p_survived <- mean(df$y)
+cat("Proportion survived (p):", round(p_survived, 3), "\n")
+cat("Proportion deceased (1-p):", round(1 - p_survived, 3), "\n")
+
+# Gini impurity
+G <- 2 * p_survived * (1 - p_survived)
+cat("Gini impurity:", round(G, 4), "\n")
+```
+
+Our Gini impurity is close to 0.5, which tells us the dataset is **nearly maximally impure**—the two classes are roughly balanced. This makes sense because we saw earlier that the class proportions are close to 50/50. A tree's job will be to find splits that create child nodes with Gini values much closer to 0.
+
+
+# Finding the split
+
+We need to find the variable that gives us the largest gain.
+
+Now, let's consider the variable `FRCAR` and split the data into two groups: $FRCAR \leq 90$ and $FRCAR > 90$. We can calculate the Gini index for each group.
+
+```{r}
+y = df$y
+x = df$FRCAR
+GL <- 2 * mean(y[x <= 90]) * (1 - mean(y[x <= 90]))
+GR <- 2 * mean(y[x > 90]) * (1 - mean(y[x > 90]))
+GL
+GR
+```
+
+The Gini index for the split is the weighted average of the Gini index for each group.  let's calculate the delta (gain) after the split.
+
+```{r}
+pL <- sum(x <= 90) / length(x)
+pR <- sum(x > 90) / length(x)
+delta <- G - (pL * GL + pR * GR)
+delta
+```
+
+# Can we find a better split?
+
+We can consider all possible splits for the variable `FRCAR` and calculate the Gini index for each split.
+
+```{r}
+# let's have a function for different splits
+GI <- function(y, x, sp){
+  G <- 2 * mean(y) * (1 - mean(y))
+  GL <- 2 * mean(y[x <= sp]) * (1 - mean(y[x <= sp]))
+  GR <- 2 * mean(y[x > sp]) * (1 - mean(y[x > sp]))
+  pL <- length(x[x <= sp]) / length(x)
+  pR <- length(x[x > sp]) / length(x) 
+  delta <- G - (pL * GL + pR * GR)
+ return(delta)
+}
+```
+
+Now, we can consider all possible splits for the variable `FRCAR` and calculate the Gini index for each split.
+
+```{r}
+# let's consider all possible splits
+splits <- sort(unique(df$FRCAR))
+
+# let's calculate the gain for each split
+delta <- c()
+for (i in 1:(length(splits) - 1)) {
+  delta[i] <- GI(df$y, df$FRCAR, splits[i])
+}
+
+delta
+splits[which.max(delta)]
+```
+```{r}
+plot(splits[-length(splits)], delta, type = "l", 
+     xlab = "Split", ylab = "Gain",
+     main = "Gain for different splits",
+     col = "blue", lwd = 2)
+abline(v = splits[which.max(delta)], col = "red")
+text(x = 70, y = 0.015, labels = paste("Gain =", round(max(delta), 4), "\nSplit =", splits[which.max(delta)]), pos = 4, col = "red")
+```
+
+# Function to find the top variables and gains
+
+```{r}
+# let's have a function to find the variable that the largest delta (gain)
+best.split <- function(x, y){
+  splits <- sort(unique(x))
+  delta <- c()
+  for (i in 1:(length(splits) - 1)) {
+    delta[i] <- GI(y, x, splits[i])
+  }
+  return(c(max(delta), splits[which.max(delta)]))
+}
+
+# apply the function to each variable
+gains <- apply(df[, -ncol(df)], 2, function(x) best.split(x, df$y))
+gains
+
+# horizontal barplot
+barplot(sort(gains[1, ]), horiz = TRUE, 
+        col = "lightblue", las = 1,
+        main = "Gains", xlab = "Gains")
+```
+
+# The 2nd split - Recursive partitioning
+
+Our first split tells us that the best feature to split on is `INSYS` and the best split value is 86. We can now split the dataset based on this feature and value.
+
+
+```{r}
+# Identify the feature for the first best split
+best_feature <- names(which.max(gains[1, ]))
+best_split_value <- gains[2, which.max(gains[1, ])]
+
+# Now, split the dataset based on the best feature and best split value
+left_subset <- df[df[, best_feature] <= best_split_value, ]
+right_subset <- df[df[, best_feature] > best_split_value, ]
+head(left_subset)
+head(right_subset)
+```
+
+Now we have two datasets, `left_subset` and `right_subset`. We can apply the `best.split` function to each subset to find the next best split.
+
+```{r}
+# Y's
+table(left_subset$y)
+table(right_subset$y)
+```
+
+```{r}
+# Apply to each subset
+gains_left <- apply(left_subset[, -ncol(left_subset)], 2, function(x) best.split(x, left_subset$y))
+gains_right <- apply(right_subset[, -ncol(right_subset)], 2, function(x) best.split(x, right_subset$y))
+gains_left
+gains_right
+```
+  
+Are we going to split on the left or right subset? We can use the same approach to decide which subset to split next.
+
+```{r}
+max(gains_left[1, ])
+max(gains_right[1, ])
+```
+
+Seems like we need to split on the right subset. Let's find the best feature and split value.
+
+```{r}
+# Identify the feature for the first best split
+best_feature_right <- names(which.max(gains_right[1, ]))
+best_split_value_right <- gains_right[2, which.max(gains_right[1, ])]
+best_feature_right
+best_split_value_right
+```
+
+Now, we can again split the dataset based on the best feature and best split value, but ...
+
+```{r}
+left_subset_right <- right_subset[right_subset[, best_feature_right] <= best_split_value_right, ]
+right_subset_right <- right_subset[right_subset[, best_feature_right] > best_split_value_right, ]
+head(left_subset_right)
+head(right_subset_right)
+
+table(left_subset_right$y)
+table(right_subset_right$y)
+```
+
+We can continue this process until we reach a stopping criterion, such as a minimum number of samples in each node, a maximum depth, or a minimum gain.  But, up to this point, we have a good understanding of the recursive partitioning process.  Nevertheless, we did not train a tree model.  We will use the `rpart` package to train the tree, later.
+
+Here's what our first two splits look like as a tree diagram, built from the exact values we just computed:
+
+```{r, echo=FALSE, fig.width=8, fig.height=5}
+# Draw the manual tree using the values computed above
+par(mar = c(1, 1, 2, 1))
+plot(NA, xlim = c(0, 10), ylim = c(0, 6), xaxt = "n", yaxt = "n",
+     xlab = "", ylab = "", bty = "n",
+     main = "Our first 2 splits (manual approach)")
+
+# Counts from our manual splits
+n_total <- nrow(df)
+n_left <- nrow(left_subset)
+n_right <- nrow(right_subset)
+n_left_right <- nrow(left_subset_right)
+n_right_right <- nrow(right_subset_right)
+
+# Root node
+rect(3.5, 4.8, 6.5, 5.8, col = "pink", border = "blue")
+text(5, 5.3, paste0("All data (n=", n_total, ")\n",
+                     sum(df$y==1), " survived / ", sum(df$y==0), " deceased"), cex = 0.75)
+
+# Split label
+text(5, 4.5, paste0(best_feature, " <= ", best_split_value, "?"), col = "red", cex = 0.85, font = 2)
+
+# Branches
+segments(5, 4.8, 2.5, 3.5, lwd = 1.5)  # left
+segments(5, 4.8, 7.5, 3.5, lwd = 1.5)  # right
+text(3.5, 4.3, "Yes", col = "darkgreen", cex = 0.8)
+text(6.5, 4.3, "No", col = "darkred", cex = 0.8)
+
+# Left child (leaf)
+rect(1, 2.5, 4, 3.5, col = "#C8E6C9", border = "blue")
+text(2.5, 3, paste0(best_feature, " <= ", best_split_value, "\n(n=", n_left, ") ",
+                     sum(left_subset$y==1), " surv / ", sum(left_subset$y==0), " dec"), cex = 0.7)
+
+# Right child (split further)
+rect(6, 2.5, 9, 3.5, col = "pink", border = "blue")
+text(7.5, 3, paste0(best_feature, " > ", best_split_value, "\n(n=", n_right, ") ",
+                     sum(right_subset$y==1), " surv / ", sum(right_subset$y==0), " dec"), cex = 0.7)
+
+# 2nd split label
+text(7.5, 2.2, paste0(best_feature_right, " <= ", best_split_value_right, "?"), 
+     col = "red", cex = 0.8, font = 2)
+
+# Branches from right child
+segments(7.5, 2.5, 5.5, 1.2, lwd = 1.5)
+segments(7.5, 2.5, 9.5, 1.2, lwd = 1.5)
+text(6.3, 2, "Yes", col = "darkgreen", cex = 0.7)
+text(8.7, 2, "No", col = "darkred", cex = 0.7)
+
+# Left grandchild
+rect(4, 0.3, 7, 1.2, col = "#C8E6C9", border = "blue")
+text(5.5, 0.75, paste0(best_feature_right, " <= ", best_split_value_right, "\n(n=", n_left_right, ") ",
+                        sum(left_subset_right$y==1), " surv / ", sum(left_subset_right$y==0), " dec"), cex = 0.65)
+
+# Right grandchild
+rect(8, 0.3, 11, 1.2, col = "#C8E6C9", border = "blue")
+text(9.5, 0.75, paste0(best_feature_right, " > ", best_split_value_right, "\n(n=", n_right_right, ") ",
+                        sum(right_subset_right$y==1), " surv / ", sum(right_subset_right$y==0), " dec"), cex = 0.65)
+```
+
+# Variable Importance
+
+Once a tree is fully grown, we can measure how important each variable was to the tree's predictions. The idea is intuitive: **for each variable, add up all the Gini impurity reductions at every node where that variable was used as the splitter.** A variable that produces large improvements at many nodes throughout the tree is more important than one that only helps at a single node.
+
+For example, `INSYS` might produce a huge gain at the root (first split), while another variable like `PVENT` might produce smaller gains at several deeper nodes. Variable importance captures the **total contribution** of each variable across the entire tree — not just the first split.
+
+In `rpart`, this is computed automatically after fitting the tree:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(rpart)
+```
+
+```{r}
+# Train a tree on our data
+vi_tree <- rpart(PRONO ~ ., data = myocarde, 
+                 control = rpart.control(cp = 0, minsplit = 2, minbucket = 1))
+
+# Variable importance (built-in)
+vi_tree$variable.importance
+
+# Visualize
+barplot(sort(vi_tree$variable.importance), horiz = TRUE, 
+        col = "lightblue", las = 1,
+        main = "Variable Importance (from rpart)", xlab = "Total Gini improvement")
+```
+
+Note that `rpart` also includes contributions from **surrogate splits** — if a variable is used as a backup splitter at a node (to handle missing data or correlated predictors), it gets partial credit. This is why some variables that don't appear as primary splitters in the tree can still have non-zero importance.
+
+# Recursive partitioning - The tree model
+
+Recursive functions are a fundamental concept in programming, where a function calls itself to solve a problem by breaking it down into smaller, more manageable sub-problems. This technique is widely used in various applications, including tree structures, sorting algorithms, and solving mathematical problems.
+
+Here's a very simple example to illustrate recursion: calculating the factorial of a number. The factorial of a number `n` (denoted as `n!`) is the product of all positive integers less than or equal to `n`. By definition, `0!` is `1`.
+
+The factorial can be expressed recursively as:
+
+`n! = n * (n-1)!` for `n > 0`. 
+`1` if `n = 0`. 
+  
+Here's how you can implement this in R:
+
+```{r}
+factorial <- function(n) {
+  if (n == 0) {
+    return(1)
+  } else {
+    return(n * factorial(n - 1))
+  }
+}
+
+print(factorial(5))
+```
+
+
+Now, let's implement a recursive function to build a decision tree. We'll use the same dataset and Gini impurity measure to find the best split for each node. We'll also use a complexity parameter to control the depth of the tree.  
+
+```{r}
+X <- df[, -ncol(df)]
+y <- df$y
+
+GI <- function(y, x, sp){
+  G <- 2 * mean(y) * (1 - mean(y))
+  GL <- 2 * mean(y[x <= sp]) * (1 - mean(y[x <= sp]))
+  GR <- 2 * mean(y[x > sp]) * (1 - mean(y[x > sp]))
+  pL <- length(x[x <= sp]) / length(x)
+  pR <- length(x[x > sp]) / length(x) 
+  delta <- G - (pL * GL + pR * GR)
+  return(delta)
+}
+  
+best.split <- function(x, y, cp) {
+  splits <- sort(unique(x))
+  delta <- numeric(length(splits) - 1)
+  for (i in 1:(length(splits) - 1)) {
+    delta[i] <- GI(y, x, splits[i])
+  }
+  if (length(delta) == 0 || max(delta) < cp) {
+    return(list(gain = 0, split_point = NA)) # No valid split
+  }
+  max_gain <- max(delta)
+  split_point <- splits[which.max(delta)]
+  return(list(gain = max_gain, split_point = split_point))
+}
+
+recursive_split <- function(X, y, cp, depth = 0, maxDepth = 10) {
+  if (ncol(X) == 0 || length(unique(y)) <= 1 || depth >= maxDepth) {
+    most_common_class <- names(sort(table(y), decreasing = TRUE))[1]
+    return(list("Leaf", most_common_class))
+  }
+  
+  gains <- sapply(1:ncol(X), function(i) best.split(X[, i], y, cp)$gain)
+  if (all(is.na(gains))) {
+    most_common_class <- names(sort(table(y), decreasing = TRUE))[1]
+    return(list("Leaf", most_common_class))
+  }
+  best_feature_idx <- which.max(gains)
+  best_feature <- names(X)[best_feature_idx]
+  best_split_value <- best.split(X[, best_feature_idx], y, cp)$split_point
+  
+  print(paste("Depth:", depth, "Best Feature:", best_feature, "Gain:", gains[best_feature_idx]))
+
+  if (is.na(best_split_value) || gains[best_feature_idx] < cp) {
+    most_common_class <- names(sort(table(y), decreasing = TRUE))[1]
+    return(list("Leaf", most_common_class))
+  }
+  
+  left_idx <- X[, best_feature_idx] <= best_split_value
+  right_idx <- X[, best_feature_idx] > best_split_value
+  left_X <- X[left_idx, ]
+  right_X <- X[right_idx, ]
+  left_y <- y[left_idx]
+  right_y <- y[right_idx]
+  
+  left_tree <- if (sum(left_idx) > 0) recursive_split(left_X, left_y, cp, depth + 1, maxDepth) else list("Leaf", names(sort(table(left_y), decreasing = TRUE))[1])
+  right_tree <- if (sum(right_idx) > 0) recursive_split(right_X, right_y, cp, depth + 1, maxDepth) else list("Leaf", names(sort(table(right_y), decreasing = TRUE))[1])
+  
+  return(list("Node" = list("Split" = best_split_value, "Feature" = best_feature), "Left" = left_tree, "Right" = right_tree))
+}
+
+cp <- 0.01  # Example complexity parameter
+tree <- recursive_split(X, y, cp)
+```
+
+And, let's print the tree structure.
+
+```{r}
+# Function to print the tree structure
+print_tree <- function(node, depth=0) {
+  if (is.null(node)) {
+    return()
+  }
+  
+  # Indent to represent the depth
+  indent <- paste(rep("  ", depth), collapse = "")
+  
+  if (!is.null(node$Leaf)) {
+    cat(indent, "Leaf:", node$Leaf, "\n")
+  } else {
+    cat(indent, "Node: If", node$Node$Feature, "<=", node$Node$Split, "\n")
+    cat(indent, "Left:\n")
+    print_tree(node$Left, depth + 1)
+    cat(indent, "Right:\n")
+    print_tree(node$Right, depth + 1)
+  }
+}
+
+print_tree(tree)
+```
+
+Obviously this is not a "trained" tree!  We will stop here and instead of investing time to train the tree, we will use the `rpart` package to train the tree.  
+
+# `rpart` package
+
+Training `rpart` is to decide how deep the tree should be, how many samples are needed to split a node, and how many samples are needed to create a leaf. 
+
+There are two ways to control the tree-building process in the `rpart` package:
+  
+1. The `rpart` function has a `control` parameter that accepts a list of control parameters. You can use this parameter to specify the control parameters for the tree-building process. 
+2. You can grow the tree to the maximum depth and then prune it using cross-validation to find the optimal tree size.  
+
+## Leaving it to `rpart`
+Here are the control parameters for the `rpart` package:
+
+- `cp`: Complexity parameter. A split will only be made if the increase in the overall goodness of split is larger than `cp`.
+- `minsplit`: the minimum number of observations that must exist in a node in order for a split to be attempted.
+- `minbucket`: the minimum number of observations in any terminal <leaf> node. If only one of `minbucket` or `minsplit` is specified, the code either sets `minsplit` to `minbucket*3` or `minbucket` to `minsplit/3`, as appropriate.
+- `maxdepth`: Maximum depth of the tree.
+
+The `rpart` function has many other parameters that control the tree-building process. You can find more details in the documentation by running `?rpart.control` in the R console.
+
+Here are the default values for the control parameters:
+
+`rpart.control(minsplit = 20, minbucket = round(minsplit/3), cp = 0.01,` 
+              `maxcompete = 4, maxsurrogate = 5, usesurrogate = 2, xval = 10,`
+              `surrogatestyle = 0, maxdepth = 30, ...)`
+
+
+```{r}
+library(rpart)
+
+# Train the tree
+
+tree_model <- rpart(PRONO ~ ., data = myocarde)
+print(tree_model)
+printcp(tree_model)
+```
+
+The output provides a summary of the tree model, including the formula used, the model type, the variables used, error rates, tree complexity parameters, and key insights. Let's break down the key components of the output:
+  
+- **Formula used**: `PRONO ~ .` - This indicates that the model is predicting a variable called "PRONO" using all other variables in the dataset "myocarde". 
+- **Model type**: Classification tree (as indicated in the first line). 
+- Only two variables were actually selected by the algorithm for tree construction: INSYS and REPUL
+
+This is important because it tells you that out of all the variables in your dataset, the algorithm determined these two were the most relevant for predicting PRONO.
+
+**Root node error**: 29/71 = 0.40845 (approximately 40.8%)
+  - This represents the error rate at the root node (before any splits) 
+  - It indicates that 29 out of 71 observations would be misclassified if we just predicted the most common class 
+  - The dataset has 71 total observations 
+  
+**CP table**:
+The table at the bottom provides information about the complexity parameter (CP) at different stages of tree growth:
+
+The initial Complexity Parameter (CP) value of 0.724138 in our CART output represents the proportional reduction in error achieved by the first split in the decision tree. This value is calculated as follows:
+  
+The CP value is calculated using this formula: `CP = (Error before split - Error after split) / (Total error at root node)`.  For classification trees like ours, this is based on the misclassification rate.
+
+From our output:
+- Root node error: 29/71 = 0.40845 (this is the proportion of misclassified observations at the root)
+- After the first split, the relative error dropped to 0.27586 of the original error
+
+Let's calculate the CP value for the first split:
+- Initial error at root node = 29 misclassifications
+- Error after first split = 29 × 0.27586 = approximately 8 misclassifications
+- Reduction in error = 29 - 8 = 21 misclassifications
+- CP value = 21/29 = 0.724138
+
+This CP value indicates that the first split eliminated approximately 72.4% of the misclassification error present at the root node, which is a substantial improvement. This high value suggests that the first split was highly effective in separating the classes in your dataset.
+
+The algorithm uses this CP value as a threshold when building the tree. Any potential split must reduce the relative error by at least this amount to be considered. As the tree grows, the CP threshold is progressively lowered (as seen in your output) to allow additional splits that offer smaller improvements.
+
+- **nsplit**: Number of splits in the tree
+- **rel error**: Relative error for the given number of splits
+- **xerror**: Cross-validated error (estimate of prediction error)
+- **xstd**: Standard deviation of the cross-validated error
+
+Looking at the three rows:
+1. The first row (CP = 0.724138) represents the root node with no splits (nsplit = 0)
+2. The second row (CP = 0.034483) indicates the tree after 1 split
+3. The third row (CP = 0.010000) shows the tree after 2 splits
+
+#### Key Insights
+
+1. **Error reduction**: The relative error dropped significantly from 1.0 to 0.27586 after just one split, indicating that the first split (likely on INSYS or REPUL) was highly informative.
+2. **Minimal improvement with second split**: The second split only reduced the relative error slightly (from 0.27586 to 0.24138), suggesting diminishing returns.
+3. **Cross-validation results**: The cross-validated error (xerror) actually increased slightly after the second split (from 0.55172 to 0.58621), suggesting that the second split may be overfitting the data.
+4. **Optimal tree size**: Based on the cross-validation error, the tree with one split (second row) appears to be optimal since it has the lowest xerror value.
+
+```{r}
+# Plot the tree
+library(rpart.plot) # You can use plot() but prp() is much better
+
+prp(
+  tree_model,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+**Why did `rpart` choose `REPUL` in the second split, while our manual algorithm picked `PVENT`?**
+
+The answer is the **default `minsplit = 20` constraint**. After splitting on INSYS, the right child has fewer than 20 observations. With the default settings, `rpart` won't even attempt a split on a node with fewer than 20 observations — so `PVENT` (the best splitter for the right child) is never considered. Instead, `rpart` can only split the left child, and the best variable there is `REPUL`.
+
+You can verify this: in Section 9.2 below, when we grow the tree with **no constraints** (`minsplit = 2, minbucket = 1, cp = 0`), `rpart` DOES pick `PVENT` — exactly matching our manual algorithm. The greedy splitting logic is the same; it's the default constraints that cause the difference.
+
+This is an important lesson: **the control parameters (`minsplit`, `minbucket`, `cp`) directly affect which splits are made**, not just how deep the tree grows. Understanding these parameters is key to understanding `rpart`'s behavior.
+
+## Prune it
+
+```{r}
+# Grow the tree to the maximum depth
+tree_model <- rpart(PRONO ~ ., data = myocarde,
+                    control = rpart.control(minsplit = 2,
+                                            minbucket = 1,
+                                            cp = 0
+                                            )
+                    )
+
+# Let's see the tree
+library(rpart.plot) # You can use plot() but prp() is much better
+prp(
+  tree_model,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+Now we are going to prune it.  But now, instead of us running cross validation, let's rely on `rpart`'s cross-validation.
+
+```{r}
+printcp(tree_model)
+min_cp = tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+min_cp
+```
+
+Now we are ready to prune:
+
+```{r}
+pruned_tree_model <- prune(tree_model, cp = min_cp)
+printcp(pruned_tree_model)
+prp(
+  pruned_tree_model,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+### A note on the 1-SE rule
+
+In the code above, we selected the CP corresponding to the **minimum** cross-validated error (`xerror`). This is a common approach, but there is an alternative that is widely used in practice: the **1-SE (one standard error) rule**.
+
+The 1-SE rule says: instead of picking the tree with the absolute lowest `xerror`, pick the **simplest tree** (fewest splits) whose `xerror` is within one standard error (`xstd`) of the minimum. The rationale is that if two trees have statistically indistinguishable performance, we should prefer the simpler one—it's less likely to overfit.
+
+Here's how you would implement it:
+
+```{r}
+# 1-SE rule
+cp_table <- tree_model$cptable
+min_xerror <- min(cp_table[, "xerror"])
+min_xstd <- cp_table[which.min(cp_table[, "xerror"]), "xstd"]
+threshold <- min_xerror + min_xstd
+
+# Find the simplest tree (fewest splits) within 1 SE of the minimum
+cp_1se <- cp_table[cp_table[, "xerror"] <= threshold, "CP"]
+cp_1se <- max(cp_1se)  # largest CP = simplest tree within the threshold
+
+cat("Minimum xerror CP:", min_cp, "\n")
+cat("1-SE rule CP:", cp_1se, "\n")
+
+# Prune with the 1-SE rule
+pruned_1se <- prune(tree_model, cp = cp_1se)
+prp(
+  pruned_1se,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+In many cases (especially with small datasets like ours), the 1-SE rule produces a simpler tree that generalizes just as well. With larger datasets, the difference between the minimum-xerror tree and the 1-SE tree may be more pronounced.
+  
+# Regression Trees
+
+Regression trees are used when the target variable is continuous. The tree-building process is similar to that of classification trees, but the impurity measure and the splitting criterion are different. Instead of the Gini impurity or entropy, regression trees use the sum of squared differences $S S=\sum\left(y_i-\bar{y}\right)^2$ to evaluate the quality of a split. 
+
+$$
+S S_T-\left(S S_L+S S_R\right)
+$$
+
+where $S S_T$ is the sum of squared differences in the current node, and $S S_L$ and $S S_R$ are the sum of squared differences in the left and right child nodes, respectively. The split that maximizes the reduction in the sum of squared differences is chosen.
+
+The `rpart` package can be used to train regression trees as well. The `method` parameter in the `rpart` function can be set to `anova` to train a regression tree. Here's an example of training a regression tree using the `rpart` package:
+
+```{r}
+library(MASS)
+data(Boston)
+
+# The target variable is `medv` (median value of owner-occupied homes in $1000s)
+# The features are all other variables in the dataset
+
+str(Boston)
+```
+
+## Default tree with `rpart`
+
+Let's first train a regression tree with the default `rpart` settings and examine its structure:
+
+```{r}
+tree_model_reg <- rpart(medv ~ ., data = Boston, method = "anova")
+printcp(tree_model_reg)
+```
+
+The CP table for regression trees works the same way as for classification trees. The `rel error` column shows the proportion of the total sum of squares explained by the tree at each stage, relative to the root node. The `xerror` column shows the 10-fold cross-validated relative error.
+
+```{r}
+prp(
+  tree_model_reg,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+The values in the leaf nodes represent the **predicted mean** of `medv` for observations that fall into that region. For example, the tree tells us that homes in areas where `rm` (average number of rooms) is less than 6.94 and `lstat` (percentage of lower status population) is greater than or equal to 14.4 have a predicted median value of about \$14,400.
+
+## Pruning the regression tree
+
+Just as with classification trees, we can grow the tree fully and then prune it. Let's apply the same approach:
+
+```{r}
+# Grow to maximum depth
+tree_reg_full <- rpart(medv ~ ., data = Boston, method = "anova",
+                       control = rpart.control(minsplit = 2,
+                                               minbucket = 1,
+                                               cp = 0))
+printcp(tree_reg_full)
+```
+
+```{r}
+# Prune using minimum xerror
+min_cp_reg <- tree_reg_full$cptable[which.min(tree_reg_full$cptable[, "xerror"]), "CP"]
+cat("Optimal CP (min xerror):", min_cp_reg, "\n")
+
+pruned_reg <- prune(tree_reg_full, cp = min_cp_reg)
+
+prp(
+  pruned_reg,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+We can also apply the **1-SE rule** here, which often produces a more parsimonious tree:
+
+```{r}
+# 1-SE rule for regression tree
+cp_table_reg <- tree_reg_full$cptable
+min_xerror_reg <- min(cp_table_reg[, "xerror"])
+min_xstd_reg <- cp_table_reg[which.min(cp_table_reg[, "xerror"]), "xstd"]
+threshold_reg <- min_xerror_reg + min_xstd_reg
+
+cp_1se_reg <- cp_table_reg[cp_table_reg[, "xerror"] <= threshold_reg, "CP"]
+cp_1se_reg <- max(cp_1se_reg)
+
+cat("Min xerror CP:", min_cp_reg, "\n")
+cat("1-SE rule CP:", cp_1se_reg, "\n")
+
+pruned_reg_1se <- prune(tree_reg_full, cp = cp_1se_reg)
+prp(
+  pruned_reg_1se,
+  type = 2,
+  extra = 1,
+  split.col = "red",
+  split.border.col = "blue",
+  box.col = "pink"
+)
+```
+
+Notice how the pruning process works identically for both classification and regression trees—the only difference is the impurity measure used internally (Gini for classification, sum of squared differences for regression). The CP table, cross-validation, and pruning logic are exactly the same. This is one of the elegant aspects of the CART framework: **the same algorithmic structure handles both classification and regression** with only the splitting criterion changing.

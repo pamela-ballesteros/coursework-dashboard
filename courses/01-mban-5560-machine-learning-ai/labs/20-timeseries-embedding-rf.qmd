@@ -1,0 +1,516 @@
+---
+title: "<span style='color: red; font-size: 50px;'>Time-Series Embedding & Random Forest</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN - Winter 2025"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+Time-series embedding for direct forecasting is a fascinating approach that essentially transforms time-series data into a format suitable for machine learning models that do not inherently handle sequential data, like Random Forest. This technique is particularly useful when dealing with time-series forecasting tasks, enabling the use of a broader range of machine learning algorithms beyond the traditional time-series models. In this notebook, we will explore the concept of time-series embedding and demonstrate how to use it for direct forecasting with Random Forest.
+
+Time-series data is a sequence of data points collected or recorded at time intervals. This type of data is found in various domains such as finance (stock prices), meteorology (temperature over time), and healthcare (heart rate monitoring).
+
+Forecasting future values in time-series data involves understanding complex temporal dependencies. Traditional time-series models like ARIMA (AutoRegressive Integrated Moving Average) or SARIMA (Seasonal ARIMA) handle these dependencies well but might not capture non-linear relationships as effectively as some machine learning models.
+
+# Embedding Time-Series Data
+
+Embedding time-series data involves creating "features" from the time-series itself for use in machine learning models. This is done by windowing the time-series data, where you take portions of the data as input features and the value to be predicted as the target. For example, to predict the value at time $t$, you might use the values at times $t-1, t-2$, and $t-3$ as features.
+
+Direct forecasting refers to the approach of forecasting one or multiple steps ahead directly. Unlike iterative forecasting, where a one-step forecast is repeatedly made and used as input for subsequent forecasts, direct forecasting aims to predict the target value(s) directly from the input features.
+
+For direct forecasting, we need to rearrange the data in a way that we can estimate 7 models for forecasting ahead each day of 7 days. We will use `embed()` function to show what we mean with rearranging data for AR(3), for example:
+
+```{r}
+Y <- 1:10
+Y <- embed(Y, 3)
+colnames(Y) = c("Y(t)", "Y(t-1)", "Y(t-2)")
+Y
+```
+Now, the key point is that there is no a temporal dependence between each row so that shuffling this data after re-structuring it admissible. Let’s have an AR(1) example on this simulated data
+
+```{r}
+# Stationary data rho < 1 but = 0.85
+n <- 10000
+rho <- 0.85 # try it with rho = 1 (non-stationary data)
+
+y <- c(0, n)
+set.seed(345)
+eps <- rnorm(n, 0, 1)
+
+for (j in 1:(n - 1)) {
+  y[j + 1] <- y[j] * rho + eps[j]
+}
+
+ylagged <- y[2:n]
+
+par(mfrow = c(1, 2))
+plot(ylagged,
+     y[1:(n - 1)],
+     col = "lightpink",
+     ylab = "y",
+     xlab = "y(t-1)")
+plot(y[1:500],
+     type = "l",
+     col = "red",
+     ylab = "y",
+     xlab = "t"
+)
+```
+## Stationarity
+
+The first step in time-series analysis is to check for stationarity. A stationary time series is one whose statistical properties such as mean, variance, and autocorrelation are constant over time. Non-stationary time series can exhibit trends, seasonality, or other patterns that make forecasting more challenging.
+
+```{r}
+# Non-Stationary data rho = 1
+n <- 10000
+rho <- 1
+
+y <- c(0, n)
+set.seed(345)
+eps <- rnorm(n, 0, 1)
+
+for (j in 1:(n - 1)) {
+  y[j + 1] <- y[j] * rho + eps[j]
+}
+
+ylagged <- y[2:n]
+
+par(mfrow = c(1, 2))
+plot(ylagged,
+     y[1:(n - 1)],
+     col = "lightpink",
+     ylab = "y",
+     xlab = "y(t-1)")
+plot(y[1:500],
+     type = "l",
+     col = "red",
+     ylab = "y",
+     xlab = "t"
+)
+```
+
+This is also called as "unit root" process or "random walk". The unit root process is a non-stationary time series where the mean and variance are not constant over time. This can make forecasting more challenging as the data does not exhibit a stable pattern.  There are tests like the Augmented Dickey-Fuller (ADF) test to check for stationarity in time series data.  We will ignore it here but can be found in the Book.
+
+Let's make it stationary by taking the first difference:
+
+```{r}
+ydiff <- diff(y)
+ylagged <- ydiff[2:(n - 1)]
+
+par(mfrow = c(1, 2))
+plot(ylagged,
+     ydiff[1:(n - 2)],
+     col = "lightpink",
+     ylab = "y",
+     xlab = "y(t-1)")
+
+plot(ydiff[1:500],
+     type = "l",
+     col = "red",
+     ylab = "y",
+     xlab = "t"
+)
+
+```
+Now, we can see that the data is stationary after taking the first difference. This is a common technique used to make non-stationary time series stationary for forecasting purposes.
+
+## OLS with Embedding
+
+We will use an AR(1) estimation with OLS after embedding:
+
+```{r}
+# Stationary data rho < 1 but = 0.85
+n <- 10000
+rho <- 0.85 
+y <- c(0, n)
+set.seed(345)
+eps <- rnorm(n, 0, 1)
+
+for (j in 1:(n - 1)) {
+  y[j + 1] <- y[j] * rho + eps[j]
+}
+
+head(y)
+y_em <- embed(y, 2)
+colnames(y_em) <- c("yt", "yt_1")
+head(y_em)
+```
+The AR(1) Estimation:
+
+```{r}
+y_em <- as.data.frame(y_em)
+ar1 <- lm(yt ~ yt_1 - 1, y_em)
+ar1
+```
+Now, shuffle the data
+
+```{r}
+# Shuffle
+ind <- sample(nrow(y_em), nrow(y_em), replace = FALSE)
+y_em_sh <- y_em[ind, ]
+
+ar1 <- lm(yt ~ yt_1 - 1, y_em_sh)
+ar1
+```
+
+This application shows the temporal independence across the observations in the rearranged data give that model (AR) is correctly specified. This is important because we can use conventional machine learning applications on time series data, like random forests.
+
+## 3-Day Embedding
+
+Let's make it 3-day embedding and estimate AR(3) model:
+
+```{r}
+y = 1:200
+
+y_em <- embed(y, 4)
+colnames(y_em) <- c("yt", "yt_1", "yt_2", "yt_3")
+head(y_em)
+```
+Now, how can we set the data for 3-day direct forecasting?
+
+```{r}
+y = 1:200
+
+h = 3
+w = 4
+
+# Start with first
+dt <- embed(y, w)
+y <- dt[, 1]
+X <- dt[, -1]
+head(cbind(y, X))
+
+# 2nd day
+y <- y[-1]
+X <- X[-nrow(X), ]
+head(cbind(y, X))
+
+# 3rd day
+y <- y[-1]
+X <- X[-nrow(X), ]
+head(cbind(y, X))
+```
+
+# Forecasting with `lm`
+
+This re-arrangement can also be applied to multivariate data sets:
+
+```{r}
+tsdf <- matrix(c(1:10, 21:30), nrow = 10)
+colnames(tsdf) <- c("Y", "X")
+first <- embed(tsdf, 3)
+colnames(first) <- c("y(t)","x(t)","y(t-1)","x(t-1)", "y(t-2)", "x(t-2)")
+head(first)
+```
+Now, we need to have three models for three forecasting horizons. Here are these models:
+ 
+$$
+\begin{array}{ll}
+\hat{y}_{t+1}=\hat{\alpha}_0+\hat{\alpha}_1 y_t+\hat{\alpha}_2 y_{t-1}+\hat{\alpha}_3 x_t+\hat{\alpha}_4 x_{t-1}+\hat{\alpha}_5 x_{t-2} & 1^{s t} \text { Period } \\
+\hat{y}_{t+2}=\hat{\beta}_0+\hat{\beta}_1 y_t+\hat{\beta}_2 y_{t-1}+\hat{\beta}_3 x_t+\hat{\beta}_4 x_{t-1}+\hat{\beta}_5 x_{t-2} & 2^{n d} \text { Period } \\
+\hat{y}_{t+3}=\hat{\omega}_0+\hat{\omega}_1 y_t+\hat{\omega}_2 y_{t-1}+\hat{\omega}_3 x_t+\hat{\omega}_4 x_{t-1}+\hat{\omega}_5 x_{t-2} & 3^{r d} \text { Period }
+\end{array}
+$$
+
+Each one of these models requires a different rearrangement in the data. Here are the required arrangement for each model:
+
+```{r, warning=FALSE, message=FALSE}
+library(tsibble)
+library(fpp3)
+
+load("dftoronto.RData")
+day <- seq.Date(
+  from = as.Date("2020/03/01"),
+  to = as.Date("2020/11/21"),
+  by = 1
+)
+
+tdata <- tibble(Day = day,
+                mob = data$mob,
+                cases = data$cases)
+
+toronto <- tdata %>%
+  as_tsibble(index = Day)
+
+toronto
+```
+
+
+```{r}
+# We need make series stationary
+trdf <- toronto %>%
+  mutate(diffcases = difference(cases),
+         diffmob = difference(mob))
+
+trdf
+```
+
+```{r}
+# Preparing data
+df <- data.frame(dcases = trdf$diffcases, dmob = trdf$diffmob)
+df <- df[complete.cases(df),]
+rownames(df) <- NULL
+df <- as.matrix(df)
+head(df)
+```
+Now we need to decide on two parameters: the window size, that is, how many lags will be included in each row; and how many days we will forecast. The next section will use more advance functions for re-arranging the data and apply the direct forecasting with random forests. For now, let’s use a 3-day window and a 3-day forecast horizon:
+
+```{r}
+h = 3
+w = 3
+fh <- c() # storage for forecast
+
+# Start with first
+dt <- embed(df, w)
+y <- dt[, 1]
+X <- dt[, -1]
+
+for (i in 1:h) {
+  fit <- lm(y ~ X)
+  l <- length(fit$fitted.values)
+  fh[i] <- fit$fitted.values[l]
+  y <- y[-1]
+  X <- X[-nrow(X), ]
+}
+
+fh
+```
+
+```{r}
+plot(1:266, trdf$diffcases, col = "red", type = "l")
+lines(267:269, fh, col = "blue")
+```
+
+```{r}
+# We set the last 7 days as our test set
+train <- df[1:258,]
+test <- df[-c(1:258),]
+
+h = 7
+w <- 3:14 # a grid for window size
+
+fh <- matrix(0, length(w), h)
+rownames(fh) <- w
+colnames(fh) <- 1:7
+
+for (s in 1:length(w)) {
+  dt <- embed(train, w[s])
+  y <- dt[, 1]
+  X <- dt[, -1]
+  for (i in 1:h) {
+    fit <- lm(y ~ X)
+    fh[s, i] <- last(fit$fitted.values)
+    y <- y[-1]
+    X <- X[-nrow(X), ]
+  }
+}
+
+fh
+```
+Rows in `fh` show the 7-day forecast for each window size. We can see which window size is the best:
+
+```{r}
+rmspe <- c()
+
+for (i in 1:nrow(fh)) {
+  rmspe[i] <- sqrt(mean((fh[i, ] - test) ^ 2))
+}
+
+rmspe
+which.min(rmspe)
+```
+
+We used the last 7 days in our data as our test set. A natural question would be whether we could shuffle the data and use any 7 days as our test set?
+
+# Forecasting with Random Forest
+
+We will utilize embedding methods for direct forecasting with Random Forests. We choose the random forests algorithm because it does not need an explicit tuning by a grid search. In the practice, however, we can still search for the number of trees and the number of variables randomly sampled as candidates at each split.
+
+```{r, warning=FALSE, message=FALSE}
+library(randomForest)
+library(tsibble)
+library(fpp3)
+
+load("toronto2.rds")
+
+#Generate Regular Sequences of Dates
+day <- seq.Date(
+  from = as.Date("2020/03/01"),
+  to = as.Date("2020/11/21"),
+  by = 1
+)
+
+tdata <- tibble(Day = day, data[, -1])
+toronto2 <- tdata %>%
+  as_tsibble(index = Day)
+toronto2
+```
+
+Except for age all other variables are non-stationary. We will take their first difference and make the series stationary before we proceed.
+
+```{r}
+df <- toronto2 %>%
+  mutate(
+    dcases = difference(cases),
+    dmob = difference(mob),
+    ddelay = difference(delay),
+    dmale = difference(male),
+    dtemp = difference(temp),
+    dhum = difference(hum)
+  )
+
+dft <- df[, -c(2:5, 7, 8)] #removing levels
+dft <- dft[-1, c(1, 3:7, 2)] # reordering the columns
+head(dft)
+```
+
+## Univariate Forecasting
+
+We will start with univariate forecasting. We will use the `embed()` function to re-arrange the data for direct forecasting. 
+
+```{r, cache=TRUE}
+library(randomForest)
+
+h = 7
+w <- 3:21 # a grid for window size
+
+fh <- matrix(0, length(w), h)
+rownames(fh) <- w
+colnames(fh) <- 1:h
+
+for (s in 1:length(w)) {
+  dt <- as.data.frame(embed(as.matrix(dft[, 2]), w[s]))
+  test_ind = nrow(dt) - (h)
+  train <- dt[1:test_ind,]
+  test <- dt[-c(1:test_ind),]
+  y <- train[, 1]
+  X <- train[, -1]
+  
+  for (i in 1:h) {
+    fit <- randomForest(X, y)
+    fh[s,] <- predict(fit, test[, -1])
+    y <- y[-1]
+    X <- X[-nrow(X),]
+  }
+}
+
+fh
+```
+
+```{r}
+actual <- test[, 1]
+rmspe <- c()
+
+for (i in 1:nrow(fh)) {
+  rmspe[i] <- sqrt(mean((fh[i,] - actual) ^ 2))
+}
+
+rmspe
+which.min(rmspe)
+```
+
+```{r}
+plot(
+  actual,
+  type = "l",
+  col = "red",
+  ylim = c(-80, 50),
+  ylab = "Actual (red) vs. Forecasts",
+  xlab = "Last 7 days",
+  main = "7-Day Foerecasts",
+  lwd = 3
+)
+lines(fh[1,], type = "l", col = "blue")
+lines(fh[2,], type = "l", col = "green")
+lines(fh[5,], type = "l", col = "orange")
+lines(fh[12,], type = "l", col = "black")
+legend(
+  "bottomright",
+  title = "Lags",
+  legend = c("3-day", "4-day", "7-day", "14-day"),
+  col = c("blue", "green", "orange"),
+  lty = c(1, 1, 1, 1, 1),
+  bty = "o",
+  cex = 0.75
+)
+```
+
+## Multivariate Forecasting
+
+We will now proceed with multivariate forecasting. We will use the `embed()` function to re-arrange the data for direct forecasting. 
+
+```{r, cache=TRUE}
+library(randomForest)
+
+h = 7
+w <- 3:14 # a grid for window size
+
+fh <- matrix(0, length(w), h)
+rownames(fh) <- w
+colnames(fh) <- 1:h
+
+for (s in 1:length(w)) {
+  dt <- as.data.frame(embed(as.matrix(dft[, -1]), w[s]))
+  test_ind = nrow(dt) - (h)
+  train <- dt[1:test_ind,]
+  test <- dt[-c(1:test_ind),]
+  y <- train[, 1]
+  X <- train[, -1]
+  
+  for (i in 1:h) {
+    fit <- randomForest(X, y)
+    fh[s,] <- predict(fit, test[, -1])
+    y <- y[-1]
+    X <- X[-nrow(X),]
+  }
+}
+
+fh
+```
+
+```{r}
+actual <- test[, 1]
+rmspe <- c()
+
+for (i in 1:nrow(fh)) {
+  rmspe[i] <- sqrt(mean((fh[i, ] - actual) ^ 2))
+}
+rmspe
+which.min(rmspe)
+```
+
+```{r}
+plot(
+  actual,
+  type = "l",
+  col = "red",
+  ylim = c(-80,+50),
+  ylab = "Actual (red) vs. Forecasts",
+  xlab = "Last 7 days",
+  main = "7-Day Foerecasts",
+  lwd = 3
+)
+lines(fh[1,], type = "l", col = "blue")
+lines(fh[3,], type = "l", col = "green")
+lines(fh[5,], type = "l", col = "orange")
+lines(fh[12,], type = "l", col = "black")
+legend(
+  "bottomright",
+  title = "Lags",
+  legend = c("3-day", "5-day", "7-day", "14-day"),
+  col = c("blue", "green", "orange", "black"),
+  lty = c(1, 1, 1, 1, 1),
+  bty = "o",
+  cex = 0.75
+)
+```
+
+A seven-day window is not enough for a reliable judgment on the forecast accuracy. One way to deal with this issue is to use rolling or expanding windows to predict the next h days.  Please see Chapter 24.3

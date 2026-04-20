@@ -1,0 +1,559 @@
+---
+title: "<span style='color: red; font-size: 50px; font-weight: bold;'>Gradient Descent for Machine Learning</span>"
+subtitle: "Batch, Stochastic, and Mini-Batch Optimization"
+author: "Dr. Aydede"
+date: today
+format: 
+  html:
+    embed-resources: true
+    code-background: true
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+In the previous note (`gradient_descent.qmd`), we built the intuition for gradient descent and saw how it finds the same OLS solution as the analytical formula $\boldsymbol{\beta} = (X^TX)^{-1}X^Ty$. In that context, we used the **entire dataset** to compute the gradient at every step — this is called **Batch Gradient Descent**.
+
+But in machine learning, datasets can be enormous (millions or billions of observations). Computing the gradient over the entire dataset at every step becomes very expensive. This is where **Stochastic Gradient Descent (SGD)** and **Mini-Batch Gradient Descent** come in: they approximate the full gradient using subsets of the data, making each update much cheaper.
+
+The gradient descent algorithm:
+  
+ - **starts with random parameters**, 
+ - computes the **gradient (derivative) of the cost function** at the current point, 
+ - then **updates the parameters by moving in the negative direction of the gradient**, 
+ - with step size controlled by the **learning rate**.  
+
+# Types of Gradient Descent
+  
+- **Batch Gradient Descent:** Computes the gradient using the **entire training dataset** at each step. Precise but slow for large N. 
+- **Stochastic Gradient Descent (SGD):** Uses **one randomly selected observation** per update. Much faster per step, but noisier.
+- **Mini-batch Gradient Descent:** Uses a **small subset** (e.g., 32–256 observations) per update. The most common variant in practice — balances speed and stability.
+
+All three variants compute gradients on **training data** — that's how the model learns. The critical question of *when to stop training* is answered by monitoring performance on a separate **validation set**. If training loss keeps decreasing but validation loss starts increasing, the model is overfitting. This distinction — training data for learning, validation data for stopping — is fundamental.
+
+## Batch Gradient Descent
+
+Batch Gradient Descent computes the gradient of the cost function with respect to the parameters for the entire training dataset. It's the most precise version of Gradient Descent, but it can be slow and computationally expensive for large datasets. Here's a simple example of Batch Gradient Descent in R:
+
+```{r}
+set.seed(1001)
+N <- 100
+int <- rep(1, N)
+x1 <- rnorm(N, mean = 10, sd = 2)
+Y <- rnorm(N, 2*x1 + int, 1)
+model <- lm(Y ~ x1)
+beta <- coef(model)
+beta
+
+plot(x1, Y, col = "blue", pch = 20)
+abline(beta)
+```
+
+```{r}
+#starting points
+set.seed(234)
+b <- runif(1, 0, 1)
+c <- runif(1, 0, 1)
+n <- length(x1)
+  
+#function
+yhat <- c + b * x1
+  
+#gradient
+MSE <- sum((Y - yhat) ^ 2) / n
+converged = FALSE
+iterations = 0
+  
+#while loop
+while (converged == FALSE) {
+    b_new <- b - ((0.01 * (1 / n)) * (sum((Y - yhat) * x1 * (-1))))
+    c_new <- c - ((0.01 * (1 / n)) * (sum(Y - yhat) * (-1)))
+    b <- b_new
+    c <- c_new
+    
+    yhat <- b * x1 + c
+    MSE_new <- sum((Y - yhat) ^ 2) / n
+    MSE <- c(MSE, MSE_new)
+    
+    d = tail(abs(diff(MSE)), 1)
+    if (round(d, 12) == 0) converged = TRUE
+    iterations = iterations + 1
+    if (iterations > 100000) converged = TRUE
+}
+
+c(iterations, c, b)
+```
+
+We can create a function for the above code as follows:
+
+```{r}
+set.seed(1001)
+N <- 1000
+int <- rep(1, N)
+x1 <- rnorm(N, mean = 10, sd = 2)
+Y <- rnorm(N, 2*x1 + int, 1)
+model <- lm(Y ~ x1)
+beta <- coef(model)
+
+grdescent <- function(x, y, lr,  maxiter) {
+  #starting points
+  set.seed(234)
+  b <- runif(1, 0, 1)
+  c <- runif(1, 0, 1)
+  n <- length(x)
+  
+  #function
+  yhat <- c + b * x
+  
+  #gradient
+  MSE <- sum((y - yhat) ^ 2) / n
+  converged = FALSE
+  iterations = 0
+  
+  #while loop
+  while (converged == F) {
+    b_new <- b - ((lr * (1 / n)) * (sum((y - yhat) * x * (-1))))
+    c_new <- c - ((lr * (1 / n)) * (sum(y - yhat) * (-1)))
+    b <- b_new
+    c <- c_new
+    
+    yhat <- b * x + c
+    MSE_new <- sum((y - yhat) ^ 2) / n
+    MSE <- c(MSE, MSE_new)
+    d = tail(abs(diff(MSE)), 1)
+    
+    if (round(d, 12) == 0) {
+      converged = TRUE
+      return(paste("Iterations: ", iterations, "Intercept: ", c, "Slope: ", b))
+    }
+    iterations = iterations + 1
+    if (iterations > maxiter) {
+      converged = TRUE
+      return(paste("Max. iter. reached, ", "Intercept:",
+                   c, "Slope:", b))
+    }
+  }
+}
+
+grdescent(x1, Y, 0.01, 100000)
+beta
+```
+
+
+Please check the book's Chapter 30 "Algorithmic Optimization" for gradient descent on a multivariate case with linear algebra.  
+
+## Stochastic Gradient Descent
+
+Instead of computing the exact gradient from all N observations, SGD approximates the gradient using **a single randomly selected observation** at each step. The key insight is that the gradient computed from one random observation is, **on average**, equal to the true gradient from the entire dataset. Each individual estimate is noisy, but over many updates, the noise averages out.
+
+**Why is SGD faster?** Not because each update finds a better direction, but because each update is O(1) instead of O(N). In the time it takes Batch GD to compute one precise gradient over all N observations, SGD has already made N individual updates. Think of it like finding the lowest point in a valley while blindfolded: Batch GD carefully surveys the entire landscape before each step (slow but precise), while SGD quickly feels the ground under one foot and takes a small step (fast but noisy). Overall, many noisy steps get you to the valley floor faster than few perfect steps.
+
+**Sampling note:** In the implementation below, we use `sample(1:N, 1)` at each iteration, which randomly draws one observation. Across iterations, the **same observation can be selected multiple times** while others may never be selected — this is effectively sampling with replacement. In the standard practice (epoch-based SGD), we instead shuffle the dataset once per epoch and process each observation exactly once, ensuring every data point contributes. We show the epoch-based approach in the Mini-batch section, where setting `batch_size = 1` gives epoch-based SGD.
+
+Here is the random-sampling SGD implementation:
+
+```{r, cache=TRUE}
+# Set seed and generate synthetic data
+set.seed(1001)
+N <- 1000
+int <- rep(1, N)
+x1 <- rnorm(N, mean = 10, sd = 2)
+Y <- rnorm(N, 2*x1 + int, 1)
+model <- lm(Y ~ x1)
+beta <- coef(model)
+
+# Starting points for SGD
+set.seed(234)
+b <- runif(1, 0, 1)
+c <- runif(1, 0, 1)
+
+# Parameters for SGD
+learning_rate <- 0.01
+max_iterations <- 200000
+convergence_tol <- 1e-8
+converged <- FALSE
+iterations <- 0
+
+# Initialize vector to track Mean Squared Error (MSE)
+MSE_vec <- numeric()
+
+# SGD loop
+while (!converged && iterations < max_iterations) {
+  # Randomly select an index for stochastic update
+  i <- sample(1:N, 1)
+  x_i <- x1[i]
+  y_i <- Y[i]
+  
+  # If we split the data and use x_i from the validation set,
+  # MSE becomes the validation error 
+  # Note that y_i could be from the validation set
+  
+  # Compute prediction for the selected data point
+  yhat_i <- c + b * x_i
+  
+  # Compute gradients for each parameter using the current data point
+  grad_b <- (yhat_i - y_i) * x_i
+  grad_c <- (yhat_i - y_i)
+  
+  # Update rules for SGD
+  b_new <- b - learning_rate * grad_b
+  c_new <- c - learning_rate * grad_c
+  
+  # Check convergence using both parameters
+  if (abs(b_new - b) < convergence_tol && abs(c_new - c) < convergence_tol) {
+    converged <- TRUE
+  }
+  
+  # Update parameters
+  b <- b_new
+  c <- c_new
+  iterations <- iterations + 1
+  
+  # For diagnostics, track MSE over the entire dataset (not for parameter update)
+  yhat <- b * x1 + c
+  current_MSE <- sum((Y - yhat)^2) / N
+  MSE_vec <- c(MSE_vec, current_MSE)
+}
+
+# Display results
+cat("Iterations:", iterations, "\n")
+cat("Final estimates: Intercept =", c, ", Slope =", b, "\n")
+cat("Final MSE:", tail(MSE_vec, 1), "\n")
+cat("True values: Intercept =", beta[1], ", Slope =", beta[2], "\n")
+```
+
+The most reliable way to find an acceptable number of iterations is through experimentation and validation. This involves:
+  
+- Splitting your data into training, validation, and test sets. 
+- Training your model for a range of iteration values. 
+- Evaluating performance on the validation set to find the iteration value that offers the best trade-off between training time and model performance. 
+- Using early stopping to automatically halt training when the validation performance no longer improves, thereby finding an acceptable number of iterations dynamically. 
+
+Stochastic Gradient Descent (SGD) has several advantages over batch gradient descent, especially in the context of large-scale machine learning tasks. Here are some key points:
+
+- **Efficiency on Large Datasets:**  
+  Batch gradient descent computes the gradient using the entire dataset at every iteration, which can be computationally expensive and slow for large datasets. SGD updates parameters using a single data point (or a mini-batch), significantly reducing computation per update.
+
+- **Faster Convergence in Practice:**  
+  Because SGD updates the model parameters more frequently (after each data point), it can often reach a reasonably good solution faster than waiting for a full pass through the dataset, even though its path to convergence is noisier.
+
+- **Better for Online Learning:**  
+  SGD naturally lends itself to online learning scenarios where data arrives in a stream. The algorithm can update its parameters continuously without needing to retrain on the entire dataset.
+
+- **Escaping Local Minima:**  
+  The inherent noise in the SGD updates can help the algorithm escape shallow local minima or saddle points in non-convex optimization problems, potentially leading to better solutions.
+
+- **Memory Efficiency:**  
+  Since SGD processes one example at a time, it requires much less memory compared to batch methods that load the whole dataset into memory.
+
+In summary, while batch gradient descent provides more stable updates by considering the full dataset, SGD offers computational efficiency and faster progress in scenarios with large amounts of data or online learning requirements.
+
+
+## Mini-batch Gradient Descent
+
+Mini-batch Gradient Descent adds structure to SGD by organizing the training into **epochs** and **batches**. Instead of randomly sampling one observation at a time (as in the SGD above), we shuffle the entire dataset, then process it in ordered chunks. This ensures every observation is used exactly once per epoch — no duplicates, no omissions.
+
+Key terminology:
+
+- **Epoch:** One complete pass through the entire training dataset. The data is shuffled at the start of each epoch, then divided into mini-batches.
+- **Batch Size:** The number of observations in each mini-batch. This controls the noise-stability trade-off:
+  - `batch_size = 1` → epoch-based SGD (every observation processed individually, but each used exactly once per epoch)
+  - `batch_size = N` → batch gradient descent (entire dataset in one step)
+  - `batch_size = 32–256` → the practical sweet spot used in deep learning
+- **Iteration:** A single parameter update using one mini-batch. If N = 10,000 and batch_size = 100, one epoch consists of 100 iterations.
+
+Mini-batch GD is the most popular variant in practice because it balances the speed of SGD with the stability of batch GD, and it takes full advantage of **vectorized operations** on modern hardware (GPUs).
+
+Here's the implementation:
+
+```{r, cache=TRUE}
+# Mini-Batch Gradient Descent for Linear Regression
+
+# 1. Data Generation and True Model Calculation
+set.seed(1001)
+N <- 1e7  # Using 10 million data points for demonstration
+x1 <- rnorm(N, mean = 10, sd = 2)
+Y <- rnorm(N, mean = 2 * x1 + 1, sd = 1)  # True relationship: Y = 1 + 2*x1 + noise
+
+# For reference, compute the closed-form solution via lm()
+model <- lm(Y ~ x1)
+beta <- coef(model)
+cat("Closed-form estimates from lm():\n")
+print(beta)
+
+# 2. Initialize Parameters for Mini-Batch Gradient Descent
+set.seed(234)
+b <- runif(1, 0, 1)  # Slope
+c <- runif(1, 0, 1)  # Intercept
+
+# 3. Hyperparameters
+learning_rate <- 0.01
+batch_size <- 10000    # Mini-batch size
+max_epochs <- 10       # Total number of epochs (passes over the dataset)
+epsilon <- 1e-6        # Convergence threshold based on MSE change
+
+# 4. Prepare to Track Convergence
+MSE_history <- numeric(max_epochs)
+converged <- FALSE
+
+# 5. Training Loop Over Epochs
+for (epoch in 1:max_epochs) {
+  # Shuffle the data indices to randomize mini-batches for each epoch
+  indices <- sample(N)
+  
+  # Process the data in mini-batches
+  for (start in seq(1, N, by = batch_size)) {
+    end <- min(start + batch_size - 1, N)
+    batch_idx <- indices[start:end]
+    
+    # Extract mini-batch data
+    x_batch <- x1[batch_idx]
+    y_batch <- Y[batch_idx]
+    
+    # Predictions for mini-batch
+    yhat_batch <- c + b * x_batch
+    
+    # Calculate gradients (for Mean Squared Error loss)
+    grad_b <- - (1 / length(x_batch)) * sum((y_batch - yhat_batch) * x_batch)
+    grad_c <- - (1 / length(x_batch)) * sum(y_batch - yhat_batch)
+    
+    # Update parameters
+    b <- b - learning_rate * grad_b
+    c <- c - learning_rate * grad_c
+  }
+  
+  # Evaluate full-dataset MSE at the end of the epoch (for monitoring only)
+  yhat <- c + b * x1
+  current_MSE <- sum((Y - yhat)^2) / N
+  MSE_history[epoch] <- current_MSE
+  
+  cat("Epoch:", epoch, "MSE:", current_MSE, "\n")
+  
+  # Check for convergence based on change in MSE (if not the first epoch)
+  if (epoch > 1 && abs(MSE_history[epoch] - MSE_history[epoch - 1]) < epsilon) {
+    converged <- TRUE
+    cat("Convergence reached at epoch", epoch, "\n")
+    break
+  }
+}
+
+# Trim the MSE_history vector to completed epochs only
+MSE_history <- MSE_history[1:epoch]
+
+# 6. Output the Final Results
+cat("\nFinal parameter estimates:\n")
+cat("Intercept (c):", c, "\n")
+cat("Slope (b):", b, "\n")
+cat("\nComparison with lm() estimates:\n")
+print(beta)
+
+```
+
+In this code, the dataset is divided into mini-batches of a specified size, and the parameters (`b` and `c`) are updated for each mini-batch. This process is repeated for a number of epochs, allowing the model to see the entire dataset multiple times, which can help in achieving better convergence.
+
+Adjusting the `batch` size and number of `epochs` can significantly affect the convergence and performance of the model. 
+  
+A smaller batch size can lead to faster convergence but can also introduce more noise into the parameter updates, while a larger batch size provides more stable updates but at a higher computational cost. The number of epochs controls how many times the algorithm will work through the entire dataset, and choosing the right number is crucial to avoid both underfitting and overfitting in ML & NN.
+
+# SGD vs Mini-batch Gradient Descent
+
+Both mini-batch gradient descent and pure stochastic gradient descent (SGD) have their merits and drawbacks. Here’s a detailed comparison:
+
+## Stochastic Gradient Descent (SGD)
+
+**Pros:**
+
+- **Frequent Updates:**  
+  Since SGD updates the parameters after each single example, it can quickly start adjusting the model, which can be useful for online learning or streaming data.
+
+- **Low Memory Usage:**  
+  Processing one example at a time means very low memory requirements, making it suitable for extremely large datasets or when resources are constrained.
+
+- **Noise Helps Escaping Local Minima:**  
+  The high variance in gradient estimates can sometimes be beneficial because the inherent noise may help the optimizer escape shallow local minima or saddle points.
+
+**Cons:**
+
+- **High Variance in Updates:**  
+  The noisy nature of single-sample updates can lead to a less stable convergence process, causing the loss to fluctuate widely from one update to the next.
+
+- **Inefficiency on Modern Hardware:**  
+  Pure SGD does not take full advantage of vectorized operations or parallel processing (e.g., on GPUs), potentially resulting in slower wall-clock times per epoch.
+
+- **Sensitive to Learning Rate:**  
+  Due to the high variance, selecting an appropriate learning rate is more critical. Too high, and the updates might overshoot; too low, and convergence might be excessively slow.
+
+---
+
+## Mini-Batch Gradient Descent
+
+**Pros:**
+
+- **Balanced Gradient Estimates:**  
+  By averaging the gradient over a small set of examples (the mini-batch), the update is less noisy compared to pure SGD, leading to more stable and smoother convergence.
+
+- **Efficient Computation:**  
+  Mini-batches are well-suited for vectorized computations, which modern hardware (like GPUs) can exploit, often resulting in faster overall training times.
+
+- **Improved Convergence Behavior:**  
+  The mini-batch approach often strikes a balance between the extremes of full-batch and pure SGD, allowing for both frequent updates and stable learning dynamics.
+
+- **Flexibility:**  
+  You can adjust the mini-batch size to control the trade-off between the noisy gradient estimates of SGD and the stability (but higher computational cost) of full-batch gradient descent.
+
+**Cons:**
+
+- **Additional Hyperparameter Tuning:**  
+  Choosing an optimal mini-batch size adds another parameter to tune. A very small batch might still be noisy (closer to SGD), while a very large batch might lose the benefits of frequent updates.
+
+- **Resource Trade-Off:**  
+  Although mini-batches can utilize hardware acceleration, they also require more memory per update compared to pure SGD. This might be a concern for extremely large models or when hardware resources are limited.
+
+- **Complexity in Implementation:**  
+  Incorporating mini-batches introduces the need for additional code to shuffle data, partition it into batches, and handle epoch-based training, which can add complexity compared to the simplicity of SGD.
+
+---
+**Summary:**
+  
+
+- **Pure SGD** is excellent for scenarios where data is streaming or when the memory footprint must be kept minimal. Its frequent updates can help navigate complex error surfaces, but at the cost of high variability and potential instability.
+  
+- **Mini-Batch Gradient Descent** offers a practical compromise: it reduces the noise in gradient estimates by averaging over several examples, while still updating parameters more frequently than full-batch methods. This balance makes it particularly popular in deep learning and other large-scale applications.
+
+In practice, mini-batch gradient descent is often preferred over pure SGD for many applications because it combines the efficiency of SGD with a more stable convergence pattern, allowing for better utilization of modern computing architectures.
+
+
+# Adjustable Learning Rate
+
+An adjustable learning rate has several advantages over a fixed learning rate in gradient-based optimization algorithms like stochastic gradient descent:
+
+Although an adjustable learning rate can lead to faster convergence, improved precision, and better overall performance in gradient-based optimization algorithms, it also introduces additional hyperparameters (e.g., **decay rate**, **annealing schedule**) that need to be tuned for optimal performance. 
+
+There are various learning rate scheduler strategies:
+  
+- **Exponential decay:** The learning rate is multiplied by a fixed decay rate at each iteration or epoch, as demonstrated in the previous example.
+Step decay: The learning rate is reduced by a fixed factor at specific intervals, such as every N epochs. For example, the learning rate could be reduced by a factor of 0.5 every 10 epochs. 
+- **Time-based decay:** The learning rate is reduced according to a function of the elapsed training time or the number of iterations. For example, the learning rate could be reduced by a factor proportional to the inverse of the square root of the number of iterations.
+- **Cosine annealing:** The learning rate is reduced following a cosine function, which allows for periodic “restarts” of the learning rate, helping the optimization process escape local minima or saddle points. 
+- **Cyclic learning rates:** The learning rate is varied cyclically within a predefined range, allowing the model to explore different areas of the loss surface more effectively. 
+- **Adaptive learning rates:** These learning rate schedulers adjust the learning rate based on the progress of the optimization process, such as the improvement in the loss function or the validation accuracy. Some well-known adaptive learning rate methods include **AdaGrad**, **RMSprop**, and **Adam**.
+  
+The choice of learning rate scheduler and its hyperparameters depends on the specific problem, the dataset, and the model architecture. It often requires experimentation and validation to find the optimal learning rate schedule for a given task.
+  
+Check the book's Chapter 30 "Algorithmic Optimization" for stochastic gradient descent with adaptive learning rates.  
+
+```{r, cache=TRUE}
+# Adjustable Learning Rate with Mini-Batch Gradient Descent in R
+
+# 1. Data Generation and True Model
+set.seed(1001)
+N <- 1e6  # 1,000,000 data points
+x1 <- rnorm(N, mean = 10, sd = 2)
+Y <- rnorm(N, mean = 2 * x1 + 1, sd = 1)  # true relationship: Y = 1 + 2*x1 + noise
+
+# Optional: Obtain reference coefficients using lm() (using a numerically stable method)
+model <- lm(Y ~ x1)
+true_coef <- coef(model)
+cat("Reference coefficients from lm():\n")
+print(true_coef)
+
+# 2. Initialize Parameters for Mini-Batch Gradient Descent
+set.seed(234)
+b <- runif(1, 0, 1)  # Slope
+c <- runif(1, 0, 1)  # Intercept
+
+# 3. Hyperparameters
+initial_lr <- 0.01        # Initial learning rate
+decay_rate <- 0.99999     # Decay factor for learning rate per epoch
+batch_size <- 50          # Mini-batch size
+max_epochs <- 100         # Maximum number of epochs (complete passes over the dataset)
+tolerance <- 1e-8         # Convergence threshold based on MSE change
+
+# 4. Pre-allocate an MSE history vector for tracking convergence
+MSE_history <- numeric(max_epochs)
+
+# 5. Compute the initial full-dataset MSE for monitoring
+yhat <- c + b * x1
+MSE_prev <- mean((Y - yhat)^2)
+MSE_history[1] <- MSE_prev
+
+# 6. Mini-Batch Gradient Descent Training Loop
+epoch <- 1
+converged <- FALSE
+
+while (!converged && epoch <= max_epochs) {
+  # Shuffle the data indices at the beginning of each epoch
+  indices <- sample(N)
+  
+  # Update the learning rate with decay for the current epoch
+  current_lr <- initial_lr * decay_rate^epoch
+  
+  # Process the data in mini-batches
+  for (start in seq(1, N, by = batch_size)) {
+    end <- min(start + batch_size - 1, N)
+    batch_idx <- indices[start:end]
+    
+    # Extract the mini-batch data
+    x_batch <- x1[batch_idx]
+    y_batch <- Y[batch_idx]
+    
+    # Compute predictions for the mini-batch
+    yhat_batch <- c + b * x_batch
+    
+    # Calculate gradients (derivatives of the MSE loss)
+    grad_b <- -mean((y_batch - yhat_batch) * x_batch)
+    grad_c <- -mean(y_batch - yhat_batch)
+    
+    # Update parameters using the gradients and the current learning rate
+    b <- b - current_lr * grad_b
+    c <- c - current_lr * grad_c
+  }
+  
+  # At the end of the epoch, compute the full-dataset MSE
+  yhat <- c + b * x1
+  MSE_current <- mean((Y - yhat)^2)
+  MSE_history[epoch] <- MSE_current
+  
+  # Display progress for insight
+  cat("Epoch:", epoch, "MSE:", MSE_current, "Learning Rate:", current_lr, "\n")
+  
+  # Check for convergence based on the change in MSE
+  if (abs(MSE_current - MSE_prev) < tolerance) {
+    converged <- TRUE
+    cat("Convergence reached at epoch", epoch, "\n")
+  }
+  
+  MSE_prev <- MSE_current
+  epoch <- epoch + 1
+}
+
+# Trim the MSE history vector to the actual number of epochs run
+MSE_history <- MSE_history[1:(epoch - 1)]
+
+# 7. Output the Final Results and Compare with lm() Coefficients
+cat("\nFinal parameter estimates:\n")
+cat("Intercept (c):", c, "\n")
+cat("Slope (b):", b, "\n")
+cat("\nReference coefficients from lm():\n")
+print(true_coef)
+
+# 8. Plot the MSE Process Over Epochs
+plot(MSE_history, type = "l", lwd = 2, col = "blue",
+     xlab = "Epoch", ylab = "Mean Squared Error (MSE)",
+     main = "MSE Process Over Epochs")
+
+```
+
+
+# Conclusion
+
+Gradient Descent—and its variants like mini-batch and stochastic gradient descent—remains a cornerstone of modern optimization in machine learning. Its iterative nature allows us to handle large datasets and complex models where closed-form solutions are impractical. By adjusting hyperparameters such as the learning rate (and possibly incorporating decay schedules), you can fine-tune the convergence behavior, balancing between speed and stability. While proper tuning is essential, gradient descent provides the flexibility needed for a wide range of applications—from simple linear models to deep neural networks. In essence, it's a powerful and adaptable tool that, when used correctly, can effectively bridge the gap between theory and real-world data challenges.
+

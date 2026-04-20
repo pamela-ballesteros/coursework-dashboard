@@ -1,0 +1,474 @@
+---
+title: "<span style='color: red; font-size: 50px;'>RNN & LSTM</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "SSB Workshop 2025 - Fundementals of ML & AI"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+Recurrent neural networks (RNNs) are a type of artificial neural network that are particularly well-suited for processing sequential data, such as time series, natural language, and speech. They are called “recurrent” because they perform the same task for every element in a sequence, with the output being dependent on the previous computations.
+
+The idea of using neural networks to process sequential data dates back to the 1980s, but it wasn’t until the late 1990s that RNNs began to see widespread use. One of the key developments in this period was the use of long short-term memory (LSTM) units, which are a type of “memory” cell that can store information for long periods of time and help prevent the vanishing gradients problem that can occur when training RNNs.
+
+![](https://cdn.mathpix.com/snip/images/ERT5_jeZY8gxV_eUSnKGpcooNAPxnxRKKBUOmx8M3h4.original.fullsize.png)
+
+$$
+\begin{aligned}
+& A_1=g\left(\omega_0+\omega_1 X_1\right) \\
+& A_2=g\left(\omega_0+\omega_1 X_2+\theta_1 A_1\right) \\
+& =g\left(\omega_0+\omega_1 X_2+\theta_1 g\left(\omega_0+\omega_1 X_1\right)\right) \\
+& A_3=g\left(\omega_0+\omega_1 X_3+\theta_1 A_2\right) \\
+& =g\left(\omega_0+\omega_1 X_3+\theta_1 g\left(\omega_0+\omega_1 X_2+\theta_1 g\left(\omega_0+\omega_1 X_1\right)\right)\right. \\
+& \quad \quad \quad \vdots \\
+& A_t=g\left(\omega_0+\omega_1 X_t+\theta_1 A_{t-1}\right)
+\end{aligned}
+$$
+
+Note that weights are the same in each sequence. Although each output layer produces a prediction, the final output is the network’s prediction. The network is trained by minimizing the difference between the predicted and actual values.
+
+$$
+Y_t=\beta_0+\beta_k A_t
+$$
+
+# RNN with Keras
+
+```{r, warning=FALSE, message=FALSE}
+library(tsibble)
+library(fpp3)
+
+load("toronto2.rds")
+toronto2 <- data
+df <- toronto2 %>%
+  mutate(
+    dcases = difference(cases),
+    dmob = difference(mob),
+    ddelay = difference(delay),
+    dmale = difference(male),
+    dtemp = difference(temp),
+    dhum = difference(hum)
+  )
+
+dft <- df[, -c(2:5, 7, 8)] #removing levels
+dft <- dft[-1, c(3:7, 2)] # reordering the columns
+sdtf <- scale(dft) # standardizing the data
+head(sdtf)
+```
+There are four stages in developing ANN models in Keras:
+  
+- Preparing the training set with input tensors and target tensors; 
+- Defining the model, that is a network of layers; 
+- Choosing the learning parameters: a loss function, an optimizer, and some metrics to monitor; 
+- And finally fitting this model to the training set.  
+
+## Input Tensors
+
+First, we need to undertsand the input tensors. The input tensor is a 3D tensor with shape `(batch_size, timesteps, input_features)`. The batch size is the number of samples in a batch, the timesteps is the number of time steps in a sequence, and the input features is the number of features at each time step. 
+
+
+```{r}
+# Data
+toydata <- matrix(c(1:100, 101:200, 201:300), 100)
+colnames(toydata) <- c("y", "x1", "x2")
+head(toydata)
+```
+The key point is that the "time step" in your RNN's input data structure can reflect how many days of past data you're using to make a prediction, which can be different from the prediction horizon of forecasting just 1 day ahead.
+
+**Steps to Prepare Input Tensors**
+  
+1. Decide on the Shape of the Data: For RNNs, your data needs to be in the shape (`samples`, `time steps`, `features`). In this case:
+
+- samples: How many 5-day sequences you can extract from your dataset. 
+- time steps: 5 (since you're using 5 days of data to make your prediction). 
+- features: 2 (x1 and x2). 
+
+2. Slide a Window Over the Dataset: To prepare your data, you will "slide" a window of 5 days across your dataset, each time moving one day forward, to create the sequences of data that will be used as input to your model.
+
+3. Prepare Targets: Correspondingly, for each 5-day input sequence, the target is the value of `y` for the next day.
+
+```{r, warning=FALSE, message=FALSE}
+library(keras)
+
+# Parameters
+n_lookback_days <- 5
+n_features <- ncol(toydata) - 1 # Since we're using x1 and x2
+
+# Initialize matrices to hold processed input and target data
+n_samples <- nrow(toydata) - n_lookback_days
+input_data <- array(dim = c(n_samples, n_lookback_days, n_features))
+target_data <- array(dim = c(n_samples))
+
+# Populate the input and target data
+for (i in 1:n_samples) {
+  input_data[i,,] <- toydata[i:(i + n_lookback_days - 1), c("x1", "x2")]
+  target_data[i] <- toydata[i + n_lookback_days, "y"]
+}
+
+# input_data is now our input tensor with the shape (samples, 5, 2)
+# target_data contains the corresponding targets for each input sequence
+
+dim(input_data)
+head(input_data[,,1])
+head(input_data[,,2])
+input_data[1,,] # slice of the first input sequence
+target_data[1] # target for the first input sequence
+input_data[2,,] # slice of the second input sequence
+target_data[2] # target for the second input sequence
+head(target_data)
+```
+This was one-day-ahead forecasting. If you wanted to forecast further into the future, you would need to adjust the target data accordingly.
+
+```{r}
+library(keras)
+
+# Parameters
+n_lookback_days <- 5
+n_forecast_days <- 3
+n_features <- ncol(toydata) - 1
+
+# Initialize matrices to hold processed input and target data
+n_samples <- nrow(toydata) - n_lookback_days - n_forecast_days + 1
+input_data <- array(dim = c(n_samples, n_lookback_days, n_features))
+target_data <- array(dim = c(n_samples, n_forecast_days))
+
+# Populate the input and target data
+for (i in 1:n_samples) {
+  input_data[i,,] <- toydata[i:(i + n_lookback_days - 1), c("x1", "x2")]
+  target_data[i,] <- toydata[(i + n_lookback_days):(i + n_lookback_days + n_forecast_days - 1), "y"]
+}
+
+dim(input_data)
+head(input_data[1,,])
+head(input_data[2,,])
+target_data[1,]
+target_data[2,]
+```
+
+We will use one-day-ahead forecasting in the following example.
+
+```{r}
+library(keras)
+
+# Parameters
+n_lookback_days <- 7
+n_features <- 6 # Assuming 'sdtf' has 6 columns based on the earlier transformation
+n_samples <- nrow(sdtf) - n_lookback_days
+
+# Initialize the arrays
+input_data <- array(dim = c(n_samples, n_lookback_days, n_features))
+target_data <- array(dim = c(n_samples))
+
+# Column index for dcases (assuming it's the first column based on your 'head(sdtf)' output)
+dcases_col_index <- 1
+
+# Fill the arrays
+for (i in 1:n_samples) {
+  # Extracting the i-th to (i+n_lookback_days-1)-th rows for all columns (features)
+  input_data[i,,] <- sdtf[i:(i + n_lookback_days - 1), ]
+
+  # The target is the 'dcases' value for the day following the end of the sequence
+  target_data[i] <- sdtf[(i + n_lookback_days), dcases_col_index]
+}
+
+# Verify shapes and content of the prepared data
+dim(input_data)  # Should show (n_samples, n_lookback_days, n_features)
+length(target_data)  # Should show n_samples
+
+head(input_data[1,,])
+head(input_data[2,,])
+head(target_data)
+```
+
+```{r}
+head(sdtf, 10)
+```
+
+## Plain RNN
+
+For forecasting with an RNN model using Keras in R, we’ll typically follow these steps after your data is prepared:
+  
+- Define the Model: Use the Keras functional API or the sequential API to define your RNN model. Given your setup, we'll use a simple RNN architecture suitable for time series forecasting. 
+- Compile the Model: Specify the loss function and the optimizer. For a regression problem like forecasting a continuous value, mean_squared_error is a common choice for the loss function. 
+- Fit the Model: Train the model on your prepared data. 
+- Evaluate/Use the Model: Assess the model's performance and use it for predictions. 
+
+```{r}
+library(keras)
+
+# Clear any previous session
+keras::k_clear_session()
+
+# Define model using functional API
+inputs <- layer_input(shape = c(n_lookback_days, n_features))
+outputs <- inputs %>%
+  layer_simple_rnn(units = 50,
+                  activation = 'relu',
+                  dropout = 0.1,
+                  recurrent_dropout = 0.1) %>%
+  layer_dense(units = 1)
+
+# Create the model
+model <- keras_model(inputs = inputs, outputs = outputs)
+
+# Compile the model
+model$compile(
+  loss = 'mean_squared_error',
+  optimizer = optimizer_rmsprop(),
+  metrics = list('mean_absolute_error')
+)
+
+# Print the model summary
+summary(model)
+```
+
+Before fitting the model, we need to split the data. We have 258 observations in total. We will take the last 50 observations as our test set:
+
+```{r}
+dim(input_data)
+```
+
+
+```{r}
+# Total observations
+total_observations <- dim(input_data)[1]
+
+# Number of observations in the test set
+test_set_size <- 50
+
+# Calculate the index where the training set ends and the test set begins
+split_index <- total_observations - test_set_size
+
+# Split the input data into training and test sets
+input_train <- input_data[1:split_index,,]
+input_test <- input_data[(split_index + 1):total_observations,,]
+
+# Split the target data into training and test sets
+target_train <- target_data[1:split_index]
+target_test <- target_data[(split_index + 1):total_observations]
+
+# Check the dimensions of the split data
+dim(input_train)  # Should show (208, 7, 6)
+dim(input_test)   # Should show (50, 7, 6)
+length(target_train)  # Should be 208
+length(target_test)   # Should be 50
+```
+
+```{r}
+# Fit the model on the training data
+history <- model$fit(
+  input_train,  # Training input sequences
+  target_train,  # Training target values
+  epochs = as.integer(100),
+  batch_size = as.integer(32),
+  validation_split = 0.2,  # Optionally, split off part of the training data for validation
+  verbose = 0  # Set to 1 to see progress during training
+)
+
+# Extract history data
+history_data <- data.frame(
+  epoch = 1:length(history$history$loss),
+  loss = unlist(history$history$loss),
+  val_loss = unlist(history$history$val_loss),
+  mae = unlist(history$history$mean_absolute_error),
+  val_mae = unlist(history$history$val_mean_absolute_error)
+)
+
+# Plot using base R
+par(mfrow = c(1, 2))
+# Loss plot
+plot(history_data$epoch, history_data$loss, type = "l", col = "blue",
+     main = "Model Loss", xlab = "Epoch", ylab = "Loss", ylim = c(0, max(history_data$loss, history_data$val_loss)))
+lines(history_data$epoch, history_data$val_loss, col = "red")
+legend("topright", legend = c("Training", "Validation"), col = c("blue", "red"), lty = 1)
+
+# MAE plot
+plot(history_data$epoch, history_data$mae, type = "l", col = "blue",
+     main = "Mean Absolute Error", xlab = "Epoch", ylab = "MAE", ylim = c(0, max(history_data$mae, history_data$val_mae)))
+lines(history_data$epoch, history_data$val_mae, col = "red")
+legend("topright", legend = c("Training", "Validation"), col = c("blue", "red"), lty = 1)
+```
+
+```{r}
+# After training, evaluate the model on the test set
+model$evaluate(input_test, target_test)
+```
+
+The $R^2$ value can be calculated using the formula:
+$$
+R^2=1-\frac{S S_{r e s}}{S S_{t o t}}
+$$
+
+where $S S_{r e s}$ is the residual sum of squares and $S S_{t o t}$ is the total sum of squares.
+
+```{r}
+# Generate predictions for the test set
+predictions <- model$predict(input_test)
+
+# If 'predictions' is a matrix with a single column, convert it to a vector
+predictions_vector <- matrix(predictions, ncol = 1)[, 1]
+
+# Now, calculate SS_res and SS_tot for R^2
+ss_res <- sum((target_test - predictions_vector) ^ 2)
+ss_tot <- sum((target_test - mean(target_test)) ^ 2)
+
+# Calculate R^2
+r_squared <- 1 - (ss_res / ss_tot)
+
+# Print the R^2 value
+print(r_squared)
+
+```
+
+```{r}
+# Plot the predictions against the true values
+plot(target_test, predictions, xlab = "True Values", ylab = "Predictions")
+abline(a = 0, b = 1, col = "red")
+```
+
+
+```{r}
+actual <- target_test
+predicted <- predictions_vector
+
+# Plot the actual values
+plot(
+  actual, 
+  type = "l", 
+  col = "blue", 
+  ylab = "Actual (Blue) vs. Prediction (Red)", 
+  xlab = "Last 50 Days", 
+  main = "RNN Forecasting for Covid-19 Cases - in differences"
+)
+
+# Overlay the predictions
+lines(predicted, col = "red", lwd = 2)
+
+```
+
+Not bad actually. The model seems to be doing a good job in capturing the trend in the data.
+
+# LSTM
+
+One issue with RNNs is that they can have difficulty learning long-term dependencies in the data. This is because the gradients can vanish or explode as they are backpropagated through the network. To address this issue, long short-term memory (LSTM) units were introduced. These units have an internal memory cell that can store information for long periods of time, allowing them to learn long-term dependencies in the data.
+
+![](https://cdn.mathpix.com/snip/images/8w6yY4tRv-OqudOcROCpqf2acdH_FaOggSaUZ16lZU8.original.fullsize.png)
+
+Please see Chapter 25.4 of the book for more details.
+
+```{r}
+# Clear any previous session
+keras::k_clear_session()
+
+# Define the model using functional API
+inputs <- layer_input(shape = c(7, 6))
+outputs <- inputs %>%
+  layer_lstm(units = 128, activation = "relu") %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 32) %>%
+  layer_dense(units = 16) %>%
+  layer_dense(units = 1, activation = "linear")
+
+# Create the model
+model <- keras_model(inputs = inputs, outputs = outputs)
+
+# Compile the model
+model$compile(
+  loss = 'mse',
+  optimizer = 'adam',
+  metrics = list("mean_absolute_error")
+)
+
+# Print model summary
+summary(model)
+```
+
+```{r}
+history <- model$fit(
+  input_train,
+  target_train,
+  epochs = as.integer(100),
+  batch_size = as.integer(32),
+  validation_split = 0.2,
+  verbose = 0
+)
+
+```
+
+```{r}
+# Extract history data
+history_data <- data.frame(
+  epoch = 1:length(history$history$loss),
+  loss = unlist(history$history$loss),
+  val_loss = unlist(history$history$val_loss),
+  mae = unlist(history$history$mean_absolute_error),
+  val_mae = unlist(history$history$val_mean_absolute_error)
+)
+
+# Plot using base R
+par(mfrow = c(1, 2))
+# Loss plot
+plot(history_data$epoch, history_data$loss, type = "l", col = "blue",
+     main = "Model Loss", xlab = "Epoch", ylab = "Loss", ylim = c(0, max(history_data$loss, history_data$val_loss)))
+lines(history_data$epoch, history_data$val_loss, col = "red")
+legend("topright", legend = c("Training", "Validation"), col = c("blue", "red"), lty = 1)
+
+# MAE plot
+plot(history_data$epoch, history_data$mae, type = "l", col = "blue",
+     main = "Mean Absolute Error", xlab = "Epoch", ylab = "MAE", ylim = c(0, max(history_data$mae, history_data$val_mae)))
+lines(history_data$epoch, history_data$val_mae, col = "red")
+legend("topright", legend = c("Training", "Validation"), col = c("blue", "red"), lty = 1)
+```
+
+```{r}
+model$evaluate(input_test, target_test)
+```
+
+```{r}
+
+# Generate predictions for the test set
+predictions <- model$predict(input_test)
+
+# If 'predictions' is a matrix with a single column, convert it to a vector
+predictions_vector <- matrix(predictions, ncol = 1)[, 1]
+
+# Now, calculate SS_res and SS_tot for R^2
+ss_res <- sum((target_test - predictions_vector) ^ 2)
+ss_tot <- sum((target_test - mean(target_test)) ^ 2)
+
+# Calculate R^2
+r_squared <- 1 - (ss_res / ss_tot)
+
+# Print the R^2 value
+print(r_squared)
+
+```
+
+
+```{r}
+actual <- target_test
+predicted <- predictions_vector
+
+# Plot the actual values
+plot(
+  actual, 
+  type = "l", 
+  col = "blue", 
+  ylab = "Actual (Blue) vs. Prediction (Red)", 
+  xlab = "Last 50 Days", 
+  main = "LSTM Forecasting for Covid-19 Cases - in differences"
+)
+
+# Overlay the predictions
+lines(predicted, col = "red", lwd = 2)
+
+```
+
+A simpler LSTM should be better
+

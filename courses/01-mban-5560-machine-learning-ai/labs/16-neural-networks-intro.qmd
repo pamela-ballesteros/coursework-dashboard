@@ -1,0 +1,699 @@
+---
+title: "<span style='color: red; font-size: 50px; font-weight: bold;'>Neural Networks: The Idea</span>"
+subtitle: "From Polynomial Regression to Adaptive Basis Functions"
+author: "Dr. Aydede"
+date: today
+format: 
+  html:
+    embed-resources: true
+    code-background: true
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(patchwork)
+```
+
+Neural networks (NN) are a class of models inspired by the human brain. **They are, however, parametric models**, and they are used for supervised learning. In this note, we build the intuition for how neural networks work by starting from something familiar — polynomial regression — and showing how neural networks generalize it.
+
+# The Idea
+
+## Polynomial Regression
+
+Let's start with a predictive model with a single input (covariate). The simplest model could be a linear model:
+
+$$
+y \approx \alpha+\beta x
+$$
+
+Since this model could be quite restrictive, we can have a more flexible one through polynomial regression:
+
+$$
+y \approx \alpha+\beta_1 x+\beta_2 x^2+\beta_3 x^3+\ldots=\alpha+\sum_{m=1}^M \beta_m x^m
+$$
+
+The polynomial regression is based on **fixed components**, or bases: $x, x^2, x^3, \ldots, x^M$. These are predetermined transformations of the input — we don't learn them from data.
+
+Let us consider a realistic (simulated) sample:
+
+```{r sim-data}
+n <- 200
+set.seed(1)
+x <- sort(runif(n))
+y <- sin(12 * (x + 0.2)) / (x + 0.2) + rnorm(n) / 2
+df <- data.frame(y, x)
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  labs(title = "Simulated Data",
+       subtitle = "True function: sin(12(x + 0.2)) / (x + 0.2) + noise",
+       x = "x", y = "y") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+We can fit a polynomial regression with M = 3:
+
+```{r poly-fit}
+ols <- lm(y ~ x + I(x^2) + I(x^3))
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  geom_line(aes(y = predict(ols)), color = "blue", linewidth = 1.5) +
+  labs(title = "Polynomial Regression: M = 3",
+       subtitle = expression(y == alpha + beta[1]*x + beta[2]*x^2 + beta[3]*x^3),
+       x = "x", y = "y") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+Now, we can think of the line as a weighted sum of **fixed components**: $\alpha + \beta_1 x + \beta_2 x^2 + \beta_3 x^3$.
+
+```{r poly-components}
+# Decompose into individual components
+first <- ols$coefficients[2] * x
+second <- ols$coefficients[3] * x^2
+third <- ols$coefficients[4] * x^3
+
+components_df <- data.frame(
+  x = rep(x, 3),
+  value = c(first, second, third),
+  Component = rep(c("b1 * x", "b2 * x^2", "b3 * x^3"), each = n)
+)
+
+ggplot(components_df, aes(x = x, y = value, color = Component)) +
+  geom_line(linewidth = 1.2) +
+  scale_color_manual(values = c("b1 * x" = "pink", "b2 * x^2" = "orange", "b3 * x^3" = "green")) +
+  facet_wrap(~Component, scales = "free_y") +
+  labs(title = "Fixed Components of the Polynomial",
+       subtitle = "Each component is a predetermined transformation of x",
+       x = "x", y = "Component value") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position = "none")
+```
+
+And their sum:
+
+```{r poly-sum}
+yhat <- ols$coefficients[1] + first + second + third
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  geom_line(aes(y = yhat), color = "red", linewidth = 1.5) +
+  labs(title = expression(y == alpha + beta[1]*x + beta[2]*x^2 + beta[3]*x^3),
+       subtitle = "Sum of Fixed Components",
+       x = "x", y = "y") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+## Polynomial to Neural Network
+
+The artificial neural net replaces these fixed components with **adjustable ones (adaptive bases)**:
+
+$$
+f\left(\alpha_1+\delta_1 x\right), \quad f\left(\alpha_2+\delta_2 x\right), \quad \ldots, \quad f\left(\alpha_M+\delta_M x\right)
+$$ 
+  
+where $f(.)$ is an **activation function**. We can see the first simple ANN as nonlinear functions of linear combinations:
+
+$$
+\begin{gathered}
+y \approx \alpha+\beta_1 f\left(\alpha_1+\delta_1 x\right)+\beta_2 f\left(\alpha_2+\delta_2 x\right)+\beta_3 f\left(\alpha_3+\delta_3 x\right)+\ldots \\
+=\alpha+\sum_{m=1}^M \beta_m f\left(\alpha_m+\delta_m x\right)
+\end{gathered}
+$$
+
+The activation function $f(.)$ introduces nonlinearity. Common choices include:
+
+```{r activation-table, echo=FALSE}
+act_df <- data.frame(
+  Function = c("Sigmoid (Logistic)", "Hyperbolic Tangent (tanh)", "ReLU"),
+  Formula = c("f(x) = 1 / (1 + e⁻ˣ)", "f(x) = (eˣ - e⁻ˣ) / (eˣ + e⁻ˣ)", "f(x) = max(0, x)"),
+  Range = c("(0, 1)", "(-1, 1)", "[0, ∞)"),
+  `Key_Property` = c(
+    "Smooth S-shaped curve, outputs probabilities",
+    "Zero-centered, stronger gradients than sigmoid",
+    "Simple, efficient, dominant in deep learning"
+  )
+)
+
+kable(act_df,
+      caption = "Common Activation Functions",
+      col.names = c("Function", "Formula", "Output Range", "Key Property")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r activation-viz, echo=FALSE}
+x_act <- seq(-5, 5, length.out = 200)
+
+act_data <- data.frame(
+  x = rep(x_act, 3),
+  y = c(
+    1 / (1 + exp(-x_act)),           # Sigmoid
+    tanh(x_act),                      # Tanh
+    pmax(0, x_act)                    # ReLU
+  ),
+  Function = rep(c("Sigmoid", "Tanh", "ReLU"), each = 200)
+)
+
+ggplot(act_data, aes(x = x, y = y, color = Function)) +
+  geom_line(linewidth = 1.3) +
+  facet_wrap(~Function, scales = "free_y") +
+  scale_color_manual(values = c("Sigmoid" = "#E41A1C", "Tanh" = "#377EB8", "ReLU" = "#4DAF4A")) +
+  labs(title = "Common Activation Functions",
+       x = "Input (z)", y = "Output f(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position = "none")
+```
+
+The crucial difference from polynomial regression: **the parameters inside the activation function ($\alpha_m$ and $\delta_m$) are learned from the data**, not predetermined. This means the network can **adapt its basis functions** to best capture the patterns in the data. Adjustable components enable capturing complex models with fewer components (smaller M).
+
+## Demonstration: ANN with Arbitrary Parameters
+
+Let's replace those fixed components $x, x^2, x^3$ in our polynomial regression with $f(\alpha_1 + \delta_1 x)$, $f(\alpha_2 + \delta_2 x)$, $f(\alpha_3 + \delta_3 x)$.
+
+The following code demonstrates the ability of a simple artificial neural network (ANN) with **arbitrary** (hand-picked) parameters to capture the underlying signal relative to a third-degree polynomial regression model. For each node, the code:
+
+1. Computes the weighted input: $z_m = \alpha_m + \delta_m \cdot x$
+2. Applies the sigmoid activation: $f(z_m) = \frac{1}{1 + e^{-z_m}}$
+3. Multiplies by the output weight: $\beta_m \cdot f(z_m)$
+
+The final output is: $\hat{y} = \text{intercept} + \beta_1 f(z_1) + \beta_2 f(z_2) + \beta_3 f(z_3)$
+
+```{r ann-arbitrary}
+a <- c(1.5, 9, 3)
+b <- c(-20, -14, -8)
+beta <- c(15, 25, -40)
+int <- 3
+
+ann <- function(a, b, beta, int) {
+  # 1st sigmoid node
+  z1 <- a[1] + b[1] * x
+  f1 <- 1 / (1 + exp(-z1))
+  
+  # 2nd sigmoid node
+  z2 <- a[2] + b[2] * x
+  f2 <- 1 / (1 + exp(-z2))
+  
+  # 3rd sigmoid node
+  z3 <- a[3] + b[3] * x
+  f3 <- 1 / (1 + exp(-z3))
+  
+  yhat <- int + beta[1] * f1 + beta[2] * f2 + beta[3] * f3
+  return(yhat)
+}
+
+yhat_ann <- ann(a, b, beta, int)
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  geom_line(aes(y = yhat_ann), color = "red", linewidth = 1.5) +
+  labs(title = "ANN with Arbitrary Parameters: M = 3 Nodes",
+       subtitle = "Hand-picked parameters — not yet optimized",
+       x = "x", y = "y") +
+  ylim(-5, 15) +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+Now let's see what happens when we **learn** the parameters from data using `neuralnet`:
+
+```{r ann-trained}
+library(neuralnet)
+set.seed(2)
+nn <- neuralnet(y ~ x, data = df, hidden = 3, threshold = 0.05)
+yhat_nn <- compute(nn, data.frame(x))$net.result
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  geom_line(aes(y = as.vector(yhat_nn)), color = "red", linewidth = 1.5) +
+  labs(title = "Neural Network with Learned Parameters: M = 3 Nodes",
+       subtitle = "Parameters optimized via backpropagation",
+       x = "x", y = "y") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+Why did the neural network perform better than polynomial regression? Because **adjustable components adapt to the data**, while fixed polynomial bases are rigid. Let's look deeper at the learned weight structure.
+
+## Understanding the Learned Weights
+
+The model is:
+
+$$
+y \approx \alpha + \sum_{m=1}^{3} \beta_m \cdot f(\alpha_m + \delta_m x)
+$$
+
+$$
+= \alpha + \beta_1 f(\alpha_1 + \delta_1 x) + \beta_2 f(\alpha_2 + \delta_2 x) + \beta_3 f(\alpha_3 + \delta_3 x)
+$$
+
+Here are the learned weights:
+
+```{r nn-weights}
+nn$weights
+```
+
+```{r nn-plot}
+plot(nn, rep = "best")
+```
+
+- **Error**: The final error of the trained network — how well the model has learned the underlying pattern
+- **Steps**: The number of iterations (weight updates) the algorithm took to converge
+
+## Visualizing the Adaptive Basis Functions
+
+We used sigmoid (logistic) activation functions. Using the learned weights:
+
+- Node 1: $f(x) = \frac{1}{1 + e^{-(1.263 - 18.959 \cdot x)}}$
+- Node 2: $f(x) = \frac{1}{1 + e^{-(6.600 - 12.247 \cdot x)}}$
+- Node 3: $f(x) = \frac{1}{1 + e^{-(2.505 - 5.701 \cdot x)}}$
+
+Each node creates a different "building block" — a shifted and scaled sigmoid:
+
+```{r nn-components}
+X <- cbind(1, x)
+
+# Compute activation for each node
+n1 <- nn$weights[[1]][[1]][, 1]
+f1 <- nn$act.fct(X %*% n1)
+
+n2 <- nn$weights[[1]][[1]][, 2]
+f2 <- nn$act.fct(X %*% n2)
+
+n3 <- nn$weights[[1]][[1]][, 3]
+f3 <- nn$act.fct(X %*% n3)
+
+# Visualize the adaptive basis functions
+basis_df <- data.frame(
+  x = rep(x, 3),
+  value = c(as.vector(f1), as.vector(f2), as.vector(f3)),
+  Node = rep(c("Node 1: f(a1 + d1*x)", "Node 2: f(a2 + d2*x)", "Node 3: f(a3 + d3*x)"), each = n)
+)
+
+ggplot(basis_df, aes(x = x, y = value, color = Node)) +
+  geom_line(linewidth = 1.2) +
+  scale_color_manual(values = c("pink", "orange", "green")) +
+  facet_wrap(~Node) +
+  labs(title = "Adaptive Basis Functions (Learned from Data)",
+       subtitle = "Compare with the fixed polynomial components — these shapes are learned!",
+       x = "x", y = "Activation output") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position = "none")
+```
+
+Now we go from these nodes to the output. Each node's activation is multiplied by its output weight ($\beta_m$), and the results are summed with a bias (intercept):
+
+$$
+\hat{y} = \underbrace{2.408}_{\text{bias}} + \underbrace{13.032}_{\beta_1} \cdot f_1 + \underbrace{19.924}_{\beta_2} \cdot f_2 + \underbrace{(-32.173)}_{\beta_3} \cdot f_3
+$$
+
+```{r nn-output}
+# From nodes to output
+f12 <- f1 * nn$weights[[1]][[2]][2]
+f22 <- f2 * nn$weights[[1]][[2]][3]
+f32 <- f3 * nn$weights[[1]][[2]][4]
+
+# Final prediction
+yhat_manual <- nn$weights[[1]][[2]][1] + f12 + f22 + f32
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "grey60", alpha = 0.7, size = 2) +
+  geom_line(aes(y = as.vector(yhat_manual)), color = "red", linewidth = 1.5) +
+  labs(title = "ANN Prediction: Manually Reconstructed from Weights",
+       subtitle = "ŷ = bias + β₁·f₁ + β₂·f₂ + β₃·f₃",
+       x = "x", y = "y") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+# Neural Networks with Multiple Inputs
+
+With a set of covariates $X = (1, x_1, x_2, \ldots, x_k)$, the model becomes:
+
+$$
+y \approx \alpha + \sum_{m=1}^{M} \beta_m f\left(\alpha_m + \delta_{m1} x_1 + \delta_{m2} x_2 + \cdots + \delta_{mk} x_k\right)
+$$
+
+Each hidden node now takes a **weighted combination of all input features**, passes it through the activation function, and the output layer combines all the node outputs.
+
+## Example: Boston Housing Data
+
+Let's apply a neural network to a real dataset:
+
+```{r boston-data}
+library(MASS)
+data("Boston")
+
+# Quick summary
+kable(data.frame(
+  Feature = names(Boston),
+  Type = sapply(Boston, class),
+  Mean = round(sapply(Boston, mean), 2),
+  SD = round(sapply(Boston, sd), 2),
+  Min = round(sapply(Boston, min), 2),
+  Max = round(sapply(Boston, max), 2)
+), caption = "Boston Housing Dataset Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), font_size = 12)
+```
+
+```{r boston-prep}
+# Check for missing values
+cat("Missing values:", sum(is.na(Boston)), "\n")
+
+# Normalize all features (neural networks are sensitive to scale)
+normalizedBoston <- as.data.frame(scale(Boston))
+
+# Train-test split
+set.seed(123)
+ind <- sample(1:nrow(normalizedBoston), size = 0.8 * nrow(normalizedBoston))
+train_data <- normalizedBoston[ind, ]
+test_data <- normalizedBoston[-ind, ]
+
+# Separate targets
+train_targets <- train_data$medv
+test_targets <- test_data$medv
+train_data$medv <- NULL
+test_data$medv <- NULL
+```
+
+## Training a Neural Network
+
+```{r boston-nn}
+library(neuralnet)
+
+# Define the formula
+formula <- paste("train_targets ~", paste(names(train_data), collapse = " + "))
+
+# Train the neural network with 5 hidden neurons
+set.seed(123)
+nn1 <- neuralnet(formula, 
+                 data = cbind(train_targets, train_data), 
+                 hidden = c(5), 
+                 linear.output = TRUE)
+```
+
+Here, `hidden = c(5)` defines a neural network with **one hidden layer containing 5 neurons**. `linear.output = TRUE` is used because this is a regression problem (continuous output).
+
+```{r boston-nn-plot}
+plot(nn1, rep = "best")
+```
+
+## Prediction Performance
+
+```{r boston-pred}
+mse_test1 <- mean((test_targets - predict(nn1, test_data))^2)
+cat(sprintf("Test MSE (5 hidden neurons): %.4f\n", mse_test1))
+```
+
+Is it good? Let's try a different architecture:
+
+```{r boston-nn2}
+# Try with 4 hidden neurons and more training steps
+set.seed(123)
+nn2 <- neuralnet(formula, 
+                 data = cbind(train_targets, train_data), 
+                 hidden = c(4), 
+                 linear.output = TRUE, 
+                 stepmax = 1e5, 
+                 learningrate = 0.01)
+```
+
+```{r boston-nn2-plot}
+plot(nn2, rep = "best")
+```
+
+```{r boston-nn2-pred}
+mse_test2 <- mean((test_targets - predict(nn2, test_data))^2)
+
+# Compare the two models
+results_df <- data.frame(
+  Model = c("NN (5 hidden neurons)", "NN (4 hidden neurons)"),
+  Test_MSE = c(mse_test1, mse_test2)
+)
+
+kable(results_df,
+      caption = "Comparing Neural Network Architectures",
+      col.names = c("Model", "Test MSE"),
+      digits = 4) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Convergence Issues
+
+If you see the warning `Algorithm did not converge`, it means the optimization didn't find a stable solution within the allowed steps. This can happen for several reasons:
+
+```{r convergence-table, echo=FALSE}
+conv_df <- data.frame(
+  Cause = c(
+    "Insufficient training steps",
+    "Learning rate too high/low",
+    "Too complex architecture",
+    "Data scaling issues"
+  ),
+  Solution = c(
+    "Increase stepmax parameter",
+    "Adjust learningrate (try 0.01, 0.001)",
+    "Reduce hidden layers/neurons",
+    "Ensure all features are scaled (we did this)"
+  ),
+  Intuition = c(
+    "Give the algorithm more time to converge",
+    "Too high → overshoots; too low → too slow",
+    "Simpler models are easier to optimize",
+    "Features on different scales create elongated loss surfaces"
+  )
+)
+
+kable(conv_df,
+      caption = "Common Convergence Issues and Solutions",
+      col.names = c("Cause", "Solution", "Intuition")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+# Understanding `neuralnet` Arguments
+
+## Core Arguments
+
+```{r core-args-table, echo=FALSE}
+core_args <- data.frame(
+  Argument = c("formula", "data", "hidden", "threshold", "stepmax", "rep"),
+  Description = c(
+    "Model specification: response ~ predictors",
+    "Data frame containing all variables",
+    "Vector specifying neurons per hidden layer. c(5,3) = two layers with 5 and 3 neurons",
+    "Stopping criterion: stops when all partial derivatives of error are below this value",
+    "Maximum number of training steps (iterations)",
+    "Number of training repetitions with different random starting weights"
+  ),
+  Typical_Values = c(
+    "—",
+    "—",
+    "c(5), c(10,5), c(8,4,2)",
+    "0.01 (default), 0.05 for faster convergence",
+    "1e5 to 1e6",
+    "1-5 (more reps = better chance of good solution)"
+  )
+)
+
+kable(core_args,
+      caption = "Core Arguments of neuralnet()",
+      col.names = c("Argument", "Description", "Typical Values")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE, color = "darkblue")
+```
+
+## Learning Rate Arguments
+
+```{r lr-args-table, echo=FALSE}
+lr_args <- data.frame(
+  Argument = c("startweights", "learningrate.limit", "learningrate.factor", "learningrate"),
+  Description = c(
+    "Initial weights (NULL = random initialization)",
+    "Min/max bounds for learning rate (for backprop)",
+    "Factors for increasing/decreasing learning rate (for rprop)",
+    "Fixed learning rate (for backprop algorithm)"
+  ),
+  Default = c("NULL", "c(1e-10, 0.1)", "list(minus=0.5, plus=1.2)", "NULL")
+)
+
+kable(lr_args,
+      caption = "Learning Rate Arguments",
+      col.names = c("Argument", "Description", "Default")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE, color = "darkblue")
+```
+
+## Algorithm and Output Control
+
+```{r algo-args-table, echo=FALSE}
+algo_args <- data.frame(
+  Argument = c("algorithm", "err.fct", "act.fct", "linear.output"),
+  Description = c(
+    "Training algorithm: 'rprop+', 'rprop-', 'backprop', or 'slr'",
+    "Error function: 'sse' (sum of squared errors) or 'ce' (cross-entropy)",
+    "Activation function: 'logistic' or 'tanh'",
+    "If TRUE, output neuron uses linear activation (for regression)"
+  ),
+  When_To_Use = c(
+    "rprop+ (default) is usually best; backprop for custom learning rates",
+    "sse for regression, ce for classification",
+    "logistic (default) or tanh — both are common",
+    "TRUE for regression, FALSE for classification"
+  )
+)
+
+kable(algo_args,
+      caption = "Algorithm and Output Control",
+      col.names = c("Argument", "Description", "When to Use")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE, color = "darkblue")
+```
+
+## Stepmax and Rep in `neuralnet`
+
+In `GradientD.qmd`, we learned three key concepts for gradient descent:
+
+- **Epoch** = one complete pass through the entire training dataset  
+- **Batch size** = the number of observations used per parameter update  
+- **Iteration** = one parameter update (one epoch may contain many iterations if we use mini-batches)
+
+How does `neuralnet` relate to these? The key fact is:
+
+> **`neuralnet` uses full-batch Rprop by default** — it computes gradients on the **entire training set** at every step. There are no mini-batches.
+
+This means **each "step" in `neuralnet` is equivalent to one epoch**: one complete pass through all the data, followed by one weight update. There is no batch size to set — every step uses all $N$ observations.
+
+With that in mind, `neuralnet` has two important parameters:
+
+### `stepmax`: How long you train (within one run)
+
+Think of training a neural network as hiking downhill to find the lowest valley. Each **step** is one weight update using the entire dataset. `stepmax` says: *"stop walking after this many steps, even if you haven't reached the bottom."*
+
+- `stepmax = 1e5` → you're allowed up to 100,000 steps per training run
+- If the algorithm converges (reaches the `threshold`) before `stepmax`, it stops early
+- If it hasn't converged by `stepmax`, training halts and you get a convergence warning → increase `stepmax` to give it more time
+
+### `rep`: How many times you start over from scratch
+
+Neural network loss surfaces are **non-convex** — there are many valleys (local minima), not just one. Where you end up depends on **where you start** (the random initial weights). `rep` says: *"start the entire hike over from a different random starting point this many times."*
+
+- `rep = 20` → train the network **20 completely independent times**, each with different random starting weights
+- Each of those 20 runs gets its own `stepmax` budget
+- Then you can pick the best one (lowest error)
+
+### They are independent (nested loops)
+
+`rep` is the **outer loop** and `stepmax` is the budget **inside each rep**. Here's what happens with `rep = 3, stepmax = 1e5`:
+
+```
+Rep 1:  random weights → train up to 100,000 steps → final error = 0.45
+Rep 2:  random weights → train up to 100,000 steps → final error = 0.32
+Rep 3:  random weights → train up to 100,000 steps → final error = 0.89 (bad start!)
+→ Pick the best: Rep 2 (error = 0.32)
+```
+
+Total work = 3 runs × up to 100,000 steps each = up to 300,000 steps total.
+
+```{r stepmax-rep-table, echo=FALSE}
+concepts <- data.frame(
+  neuralnet_Concept = c("Step", "Stepmax", "Rep"),
+  What_It_Means = c(
+    "One weight update using the entire dataset",
+    "Max steps within one training run — the budget per rep",
+    "Number of independent training runs, each starting from different random weights"
+  ),
+  GradientD_Equivalent = c(
+    "≈ One epoch (full-batch gradient descent)",
+    "≈ Maximum number of epochs per run",
+    "No direct equivalent — addresses the local minima problem"
+  ),
+  Typical_Values = c(
+    "—",
+    "1e5 to 1e6 (increase if you see convergence warnings)",
+    "1–5 (more reps = better chance of finding a good solution)"
+  )
+)
+
+kable(concepts,
+      caption = "Mapping neuralnet Concepts to Gradient Descent Terminology",
+      col.names = c("neuralnet Concept", "What It Means", "GradientD Equivalent", "Typical Values")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+# Backpropagation Algorithms
+
+## Resilient Backpropagation (Rprop)
+
+Resilient Backpropagation (Rprop) is the **default algorithm** in `neuralnet`. It overcomes a key difficulty with standard gradient descent: the learning rate problem.
+
+Standard gradient descent updates weights proportional to both the **direction** and **magnitude** of the gradient. But gradient magnitudes can vary wildly across different weights, making a single learning rate problematic.
+
+Rprop's solution is elegant:
+
+1. **Only the sign matters**: Rprop uses only the **sign** of the gradient (positive or negative) to determine the update direction, ignoring the magnitude
+2. **Individual step sizes**: Each weight has its own adaptive step size
+3. **Adaptive adjustment**: If the gradient keeps the same sign → increase the step size (we're heading in the right direction, go faster). If the gradient changes sign → decrease the step size (we overshot, be more careful)
+
+```{r rprop-table, echo=FALSE}
+rprop_df <- data.frame(
+  Variant = c("Rprop+", "Rprop-", "iRprop+"),
+  Description = c(
+    "If gradient changes sign (overshoot), undo the last update and decrease step size",
+    "Only adjusts step sizes without reverting the last update",
+    "Improved version that handles flat regions of the error surface better"
+  ),
+  When_To_Use = c(
+    "Default in neuralnet — good general choice",
+    "Simpler, sometimes faster",
+    "When the error surface has many flat regions"
+  )
+)
+
+kable(rprop_df,
+      caption = "Variants of Resilient Backpropagation",
+      col.names = c("Variant", "Description", "When to Use")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+The key advantages of Rprop over standard backpropagation:
+
+- **No global learning rate to tune**: Each weight adapts independently
+- **Faster convergence**: Adapts quickly to the local curvature of the error surface
+- **More robust**: Less sensitive to the scale of inputs and the architecture of the network
+
+---
+
+### References
+
+- Hastie, T., Tibshirani, R., & Friedman, J. (2009). *The Elements of Statistical Learning*. Springer. Chapter 11: Neural Networks.
+- Goodfellow, I., Bengio, Y., & Courville, A. (2016). *Deep Learning*. MIT Press. Chapters 6-8.
+- Riedmiller, M., & Braun, H. (1993). A direct adaptive method for faster backpropagation learning: The RPROP algorithm. *IEEE International Conference on Neural Networks*.
+
+### R Session Information
+
+```{r session-info}
+sessionInfo()
+```

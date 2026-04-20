@@ -1,0 +1,643 @@
+---
+title: "<span style='color: red; font-size: 30px;'>GBM vs XGBoost: Applied Comparison</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+In the previous notebooks, we covered the theory behind GBM and XGBoost separately. Now let's put them to work on the **same real-world dataset** and compare them head-to-head — first for **regression**, then for **classification**.
+
+We'll use the **Ames Housing** dataset (2,930 home sales in Ames, Iowa) with 80 features describing every aspect of a house. This is the same dataset you've seen in earlier assignments, but now we'll use it to compare two boosting algorithms side by side.
+
+# Data Preparation
+
+Both GBM and XGBoost need the same data, but in different formats. Let's load and prepare everything once, then feed it to both algorithms.
+
+## Loading and Cleaning
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(gbm)
+library(xgboost)
+library(caret)
+library(ROCR)
+
+# Load the Ames Housing data
+ames <- read.csv("../Week4/Assignment/AmesHousing.csv")
+
+# Clean column names: replace spaces and special characters
+names(ames) <- make.names(names(ames), unique = TRUE)
+
+dim(ames)
+```
+
+```{r}
+# Quick look at the target variable
+summary(ames$SalePrice)
+hist(ames$SalePrice, breaks = 50, col = "steelblue", main = "Sale Price Distribution",
+     xlab = "Sale Price ($)")
+```
+
+The distribution is right-skewed — common for price data. We'll use `log(SalePrice)` for regression to make the distribution more symmetric.
+
+## Feature Selection and Cleaning
+
+The full dataset has 82 columns. Many have missing values or low information. Let's select a practical subset of features that cover different aspects of a house:
+
+```{r}
+# Select useful features + target
+features <- c(
+  "Gr.Liv.Area", "Overall.Qual", "Overall.Cond", "Year.Built",
+  "Total.Bsmt.SF", "X1st.Flr.SF", "Full.Bath", "Half.Bath",
+  "Bedroom.AbvGr", "Garage.Cars", "Garage.Area", "Lot.Area",
+  "Fireplaces", "TotRms.AbvGrd", "Year.Remod.Add",
+  "MS.Zoning", "Neighborhood", "Bldg.Type", "House.Style",
+  "Central.Air", "Foundation", "Exter.Qual"
+)
+
+df <- ames[, c(features, "SalePrice")]
+
+# Remove rows with any NA
+df <- na.omit(df)
+
+# Convert character columns to factors (required by gbm)
+df <- df %>% mutate(across(where(is.character), as.factor))
+
+dim(df)
+```
+
+```{r}
+# Log-transform the target for regression
+df$logSalePrice <- log(df$SalePrice)
+```
+
+## Train/Test Split
+
+We use a fixed 80/20 split so both GBM and XGBoost are evaluated on the **exact same** test set:
+
+```{r}
+set.seed(42)
+train_idx <- sample(1:nrow(df), size = 0.8 * nrow(df))
+train_df <- df[train_idx, ]
+test_df  <- df[-train_idx, ]
+
+cat("Training:", nrow(train_df), "rows\n")
+cat("Test:    ", nrow(test_df), "rows\n")
+```
+
+## Preparing XGBoost Format
+
+GBM can work directly with data frames and formulas. XGBoost needs a numeric matrix. We prepare both:
+
+```{r}
+# One-hot encode for XGBoost using caret::dummyVars()
+dv <- dummyVars(~ . - SalePrice - logSalePrice, data = train_df)
+
+X_train <- predict(dv, newdata = train_df)
+X_test  <- predict(dv, newdata = test_df)
+
+cat("Feature matrix:", ncol(X_train), "columns after one-hot encoding\n")
+```
+
+```{r}
+# Create DMatrix objects for XGBoost
+# Regression targets (log scale)
+dtrain_reg <- xgb.DMatrix(data = X_train, label = train_df$logSalePrice)
+dtest_reg  <- xgb.DMatrix(data = X_test,  label = test_df$logSalePrice)
+```
+
+---
+
+# Regression — Predicting Sale Price
+
+**Goal**: Predict `log(SalePrice)` using housing features.
+**Metric**: RMSE on the test set (on log scale).
+
+## GBM Regression
+
+We tune GBM using its built-in 10-fold cross-validation to find the optimal number of trees:
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+t_gbm <- system.time({
+  gbm_reg <- gbm(
+    formula = logSalePrice ~ . - SalePrice,
+    distribution = "gaussian",
+    data = train_df,
+    n.trees = 2000,
+    interaction.depth = 4,
+    shrinkage = 0.05,
+    n.minobsinnode = 10,
+    bag.fraction = 0.8,
+    cv.folds = 10,
+    verbose = FALSE
+  )
+})
+
+# Best iteration from CV
+best_iter_gbm <- gbm.perf(gbm_reg, method = "cv", plot.it = FALSE)
+cat("GBM best iteration:", best_iter_gbm, "\n")
+cat("GBM CV RMSE:       ", round(sqrt(min(gbm_reg$cv.error)), 4), "\n")
+cat("GBM training time: ", round(t_gbm["elapsed"], 1), "seconds\n")
+```
+
+### GBM Test Predictions
+
+```{r}
+# Predict on test set
+yhat_gbm <- predict(gbm_reg, newdata = test_df, n.trees = best_iter_gbm)
+
+# RMSE on log scale
+rmse_gbm <- sqrt(mean((test_df$logSalePrice - yhat_gbm)^2))
+cat("GBM test RMSE (log scale):", round(rmse_gbm, 4), "\n")
+```
+
+## XGBoost Regression
+
+We use `xgb.train()` with early stopping on a validation set:
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+evals_reg <- list(train = dtrain_reg, test = dtest_reg)
+
+params_reg <- list(
+  max_depth = 4,
+  eta = 0.05,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  objective = "reg:squarederror",
+  eval_metric = "rmse"
+)
+
+t_xgb <- system.time({
+  xgb_reg <- xgb.train(
+    params = params_reg,
+    data = dtrain_reg,
+    nrounds = 2000,
+    evals = evals_reg,
+    early_stopping_rounds = 20,
+    verbose = 0
+  )
+})
+
+best_iter_xgb <- as.numeric(xgb.attributes(xgb_reg)$best_iteration)
+best_rmse_xgb <- as.numeric(xgb.attributes(xgb_reg)$best_score)
+cat("XGBoost best iteration:", best_iter_xgb, "\n")
+cat("XGBoost best val RMSE: ", round(best_rmse_xgb, 4), "\n")
+cat("XGBoost training time: ", round(t_xgb["elapsed"], 1), "seconds\n")
+```
+
+### XGBoost Test Predictions
+
+```{r}
+yhat_xgb <- predict(xgb_reg, dtest_reg)
+
+rmse_xgb <- sqrt(mean((test_df$logSalePrice - yhat_xgb)^2))
+cat("XGBoost test RMSE (log scale):", round(rmse_xgb, 4), "\n")
+```
+
+## Regression Head-to-Head
+
+```{r}
+# Summary comparison
+reg_comparison <- data.frame(
+  Model = c("GBM", "XGBoost"),
+  Best_Iteration = c(best_iter_gbm, best_iter_xgb),
+  Test_RMSE = round(c(rmse_gbm, rmse_xgb), 4),
+  Training_Time_sec = round(c(t_gbm["elapsed"], t_xgb["elapsed"]), 1)
+)
+reg_comparison
+```
+
+### Variable Importance Comparison
+
+```{r, fig.height=5, fig.width=10}
+par(mfrow = c(1, 2))
+
+# GBM importance
+gbm_imp <- summary.gbm(gbm_reg, plotit = FALSE)
+barplot(head(gbm_imp$rel.inf, 10), names.arg = head(gbm_imp$var, 10),
+        las = 2, col = "steelblue", main = "GBM: Top 10 Features",
+        ylab = "Relative Influence", cex.names = 0.7)
+
+# XGBoost importance
+xgb_imp <- xgb.importance(model = xgb_reg)
+barplot(head(xgb_imp$Gain, 10), names.arg = head(xgb_imp$Feature, 10),
+        las = 2, col = "coral", main = "XGBoost: Top 10 Features",
+        ylab = "Gain", cex.names = 0.7)
+```
+
+Notice something odd? In GBM, `Neighborhood` is the **2nd most important variable**. In XGBoost's top 10, it's **completely missing**. Did XGBoost decide neighborhoods don't matter? No — this is an artifact of **one-hot encoding**.
+
+GBM handles categorical variables natively: it treats `Neighborhood` as one variable and reports its total importance. XGBoost requires a numeric matrix, so we one-hot encoded `Neighborhood` into ~25 dummy columns (`Neighborhood.Northridge`, `Neighborhood.Old_Town`, etc.). The importance of `Neighborhood` gets **fragmented** across all these dummies — each one contributes a small slice, so none individually ranks in the top 10.
+
+
+::: {.callout-note}
+## Regression results
+
+Both models produce similar test RMSE — they use the same gradient boosting framework underneath. The key differences are:
+
+**Speed.** XGBoost is typically faster, especially on larger datasets, because it parallelizes the split search within each tree.
+
+**Tuning workflow: CV vs. validation set.** GBM uses `cv.folds` for internal k-fold cross-validation — the approach you already know well. XGBoost takes a different approach: you pass a held-out **validation set** via the `evals` argument and set `early_stopping_rounds`. During training, XGBoost evaluates the metric on this validation set after every round. If the metric doesn't improve for `early_stopping_rounds` consecutive rounds, it stops. This is conceptually similar to CV (both estimate out-of-sample error to pick the best iteration), but using a single validation set is faster than running k separate folds. XGBoost also supports `xgb.cv()` for k-fold CV when you want it (we use it in the grid search section below).
+
+**Feature importance and one-hot encoding.** This is the most important difference to understand. GBM handles categorical variables natively — `Neighborhood` is one variable, and its total influence is reported as a single number. XGBoost requires a numeric matrix, so categorical variables must be one-hot encoded first. This means `Neighborhood` becomes ~25 separate dummy columns, and its importance gets **fragmented** across all of them. As the plots above show, `Neighborhood` is the 2nd most important feature in GBM but completely missing from XGBoost's raw top 10. This doesn't mean XGBoost thinks neighborhoods don't matter — it means the importance is spread thinly across many dummies, so none individually ranks high. **Takeaway:** when comparing feature importance across models, keep in mind that one-hot encoding can make important categorical variables "disappear" from the top of XGBoost's list. To get a fair comparison, you would need to aggregate the dummy-level importance back to the original variable level.
+:::
+
+---
+
+# Classification — Predicting High vs. Low Price
+
+Now we convert the same data into a **classification problem**: is the sale price above or below the median?
+
+## Creating the Binary Target
+
+```{r}
+# Create binary target: 1 = above median, 0 = below median
+median_price <- median(train_df$SalePrice)
+cat("Median sale price (from training data): $", format(median_price, big.mark = ","), "\n")
+
+train_df$price_high <- ifelse(train_df$SalePrice > median_price, 1, 0)
+test_df$price_high  <- ifelse(test_df$SalePrice > median_price, 1, 0)
+
+cat("\nTraining set class distribution:\n")
+table(train_df$price_high)
+
+cat("\nTest set class distribution:\n")
+table(test_df$price_high)
+```
+
+```{r}
+# Update XGBoost DMatrix with classification labels
+dtrain_cls <- xgb.DMatrix(data = X_train, label = train_df$price_high)
+dtest_cls  <- xgb.DMatrix(data = X_test,  label = test_df$price_high)
+```
+
+## GBM Classification
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+t_gbm_cls <- system.time({
+  gbm_cls <- gbm(
+    formula = price_high ~ . - SalePrice - logSalePrice,
+    distribution = "bernoulli",
+    data = train_df,
+    n.trees = 2000,
+    interaction.depth = 4,
+    shrinkage = 0.05,
+    n.minobsinnode = 10,
+    bag.fraction = 0.8,
+    cv.folds = 10,
+    verbose = FALSE
+  )
+})
+
+best_iter_gbm_cls <- gbm.perf(gbm_cls, method = "cv", plot.it = FALSE)
+cat("GBM best iteration:", best_iter_gbm_cls, "\n")
+cat("GBM training time: ", round(t_gbm_cls["elapsed"], 1), "seconds\n")
+```
+
+### GBM Classification Results
+
+```{r}
+# Predicted probabilities on test set
+phat_gbm <- predict(gbm_cls, newdata = test_df, n.trees = best_iter_gbm_cls, type = "response")
+
+# AUC
+pred_gbm_cls <- prediction(phat_gbm, test_df$price_high)
+auc_gbm <- performance(pred_gbm_cls, "auc")@y.values[[1]]
+cat("GBM AUC:", round(auc_gbm, 4), "\n")
+```
+
+```{r}
+# Confusion matrix
+yhat_gbm_cls <- factor(ifelse(phat_gbm > 0.5, 1, 0), levels = c(0, 1))
+test_cls_factor <- factor(test_df$price_high, levels = c(0, 1))
+confusionMatrix(yhat_gbm_cls, test_cls_factor, positive = "1")
+```
+
+## XGBoost Classification
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+evals_cls <- list(train = dtrain_cls, test = dtest_cls)
+
+params_cls <- list(
+  max_depth = 4,
+  eta = 0.05,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  objective = "binary:logistic",
+  eval_metric = "auc"
+)
+
+t_xgb_cls <- system.time({
+  xgb_cls <- xgb.train(
+    params = params_cls,
+    data = dtrain_cls,
+    nrounds = 2000,
+    evals = evals_cls,
+    early_stopping_rounds = 20,
+    verbose = 0
+  )
+})
+
+best_iter_xgb_cls <- as.numeric(xgb.attributes(xgb_cls)$best_iteration)
+best_auc_xgb <- as.numeric(xgb.attributes(xgb_cls)$best_score)
+cat("XGBoost best iteration:", best_iter_xgb_cls, "\n")
+cat("XGBoost best val AUC:  ", round(best_auc_xgb, 4), "\n")
+cat("XGBoost training time: ", round(t_xgb_cls["elapsed"], 1), "seconds\n")
+```
+
+### XGBoost Classification Results
+
+```{r}
+# Predicted probabilities on test set
+phat_xgb <- predict(xgb_cls, dtest_cls)
+
+# AUC
+pred_xgb_cls <- prediction(phat_xgb, test_df$price_high)
+auc_xgb <- performance(pred_xgb_cls, "auc")@y.values[[1]]
+cat("XGBoost AUC:", round(auc_xgb, 4), "\n")
+```
+
+```{r}
+# Confusion matrix
+yhat_xgb_cls <- factor(ifelse(phat_xgb > 0.5, 1, 0), levels = c(0, 1))
+confusionMatrix(yhat_xgb_cls, test_cls_factor, positive = "1")
+```
+
+## Classification Head-to-Head
+
+```{r}
+cls_comparison <- data.frame(
+  Model = c("GBM", "XGBoost"),
+  Best_Iteration = c(best_iter_gbm_cls, best_iter_xgb_cls),
+  Test_AUC = round(c(auc_gbm, auc_xgb), 4),
+  Training_Time_sec = round(c(t_gbm_cls["elapsed"], t_xgb_cls["elapsed"]), 1)
+)
+cls_comparison
+```
+
+### ROC Curves
+
+```{r, fig.width=7, fig.height=5}
+# ROC curves for both models
+roc_gbm <- performance(pred_gbm_cls, "tpr", "fpr")
+roc_xgb <- performance(pred_xgb_cls, "tpr", "fpr")
+
+plot(roc_gbm, col = "steelblue", lwd = 2, main = "ROC Curves: GBM vs XGBoost")
+plot(roc_xgb, col = "coral", lwd = 2, add = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "grey")
+legend("bottomright",
+       legend = c(paste0("GBM (AUC = ", round(auc_gbm, 3), ")"),
+                  paste0("XGBoost (AUC = ", round(auc_xgb, 3), ")")),
+       col = c("steelblue", "coral"), lwd = 2)
+```
+
+---
+
+# Can We Do Better? Hyperparameter Grid Search
+
+In the previous sections, we used a single set of "reasonable" hyperparameters for both models. But how do we know those are the best? In practice, you should **systematically search** over combinations of hyperparameters to find the best configuration. This is called **grid search**.
+
+We'll demonstrate this for the **regression** task (predicting log SalePrice). The same approach works for classification — just change the loss function and evaluation metric.
+
+## GBM Grid Search
+
+GBM's built-in `cv.folds` makes grid search straightforward: loop over parameter combinations, use internal CV to find the best iteration for each, and record the CV error.
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+# Define the grid
+gbm_grid <- expand.grid(
+  shrinkage = c(0.01, 0.05, 0.1),
+  interaction.depth = c(3, 4, 5),
+  n.minobsinnode = c(5, 10),
+  bag.fraction = c(0.7, 0.85),
+  best_trees = 0,
+  cv_rmse = 0
+)
+
+cat("Total GBM combinations to try:", nrow(gbm_grid), "\n")
+```
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+t_gbm_grid <- system.time({
+  for (i in 1:nrow(gbm_grid)) {
+    
+    fit <- gbm(
+      formula = logSalePrice ~ . - SalePrice,
+      distribution = "gaussian",
+      data = train_df,
+      n.trees = 2000,
+      interaction.depth = gbm_grid$interaction.depth[i],
+      shrinkage = gbm_grid$shrinkage[i],
+      n.minobsinnode = gbm_grid$n.minobsinnode[i],
+      bag.fraction = gbm_grid$bag.fraction[i],
+      cv.folds = 5,
+      verbose = FALSE
+    )
+    
+    gbm_grid$best_trees[i] <- which.min(fit$cv.error)
+    gbm_grid$cv_rmse[i] <- sqrt(min(fit$cv.error))
+  }
+})
+
+cat("GBM grid search time:", round(t_gbm_grid["elapsed"], 1), "seconds\n\n")
+
+# Show top 10
+gbm_grid %>%
+  arrange(cv_rmse) %>%
+  head(10)
+```
+
+```{r}
+# Best GBM configuration
+best_gbm <- gbm_grid %>% arrange(cv_rmse) %>% slice(1)
+cat("Best GBM hyperparameters:\n")
+cat("  shrinkage:        ", best_gbm$shrinkage, "\n")
+cat("  interaction.depth:", best_gbm$interaction.depth, "\n")
+cat("  n.minobsinnode:   ", best_gbm$n.minobsinnode, "\n")
+cat("  bag.fraction:     ", best_gbm$bag.fraction, "\n")
+cat("  best_trees:       ", best_gbm$best_trees, "\n")
+cat("  CV RMSE:          ", round(best_gbm$cv_rmse, 4), "\n")
+```
+
+### Tuned GBM: Test Performance
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+# Retrain with best hyperparameters (no CV needed — just the final model)
+gbm_tuned <- gbm(
+  formula = logSalePrice ~ . - SalePrice,
+  distribution = "gaussian",
+  data = train_df,
+  n.trees = best_gbm$best_trees,
+  interaction.depth = best_gbm$interaction.depth,
+  shrinkage = best_gbm$shrinkage,
+  n.minobsinnode = best_gbm$n.minobsinnode,
+  bag.fraction = best_gbm$bag.fraction,
+  verbose = FALSE
+)
+
+yhat_gbm_tuned <- predict(gbm_tuned, newdata = test_df, n.trees = best_gbm$best_trees)
+rmse_gbm_tuned <- sqrt(mean((test_df$logSalePrice - yhat_gbm_tuned)^2))
+cat("Tuned GBM test RMSE:", round(rmse_gbm_tuned, 4), "\n")
+cat("Baseline GBM test RMSE:", round(rmse_gbm, 4), "\n")
+```
+
+## XGBoost Grid Search
+
+In the regression section above, we used `xgb.train()` with a held-out validation set (`evals` + `early_stopping_rounds`) to pick the best iteration. That's fast but relies on a single train/validation split. For grid search, we switch to `xgb.cv()`, which performs **k-fold cross-validation internally** — just like GBM's `cv.folds`. It splits the training data into k folds, trains k separate models, averages the error across folds, and supports `early_stopping_rounds` so each configuration stops early when it plateaus. This gives a more reliable estimate of each hyperparameter combination's quality, which is exactly what we need when comparing many configurations.
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+# Define the grid
+xgb_grid <- expand.grid(
+  eta = c(0.01, 0.05, 0.1),
+  max_depth = c(3, 4, 5),
+  subsample = c(0.7, 0.85),
+  colsample_bytree = c(0.7, 0.85),
+  best_nrounds = 0,
+  cv_rmse = 0
+)
+
+cat("Total XGBoost combinations to try:", nrow(xgb_grid), "\n")
+```
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+t_xgb_grid <- system.time({
+  for (i in 1:nrow(xgb_grid)) {
+    
+    params_i <- list(
+      eta = xgb_grid$eta[i],
+      max_depth = xgb_grid$max_depth[i],
+      subsample = xgb_grid$subsample[i],
+      colsample_bytree = xgb_grid$colsample_bytree[i],
+      objective = "reg:squarederror",
+      eval_metric = "rmse"
+    )
+    
+    cv_result <- xgb.cv(
+      params = params_i,
+      data = dtrain_reg,
+      nrounds = 2000,
+      nfold = 5,
+      early_stopping_rounds = 20,
+      verbose = 0
+    )
+    
+    # Extract best result from evaluation log
+    eval_log <- as.data.frame(cv_result$evaluation_log)
+    test_col <- grep("test.*rmse.*mean", names(eval_log), value = TRUE)[1]
+    best_idx <- which.min(eval_log[[test_col]])
+    
+    xgb_grid$best_nrounds[i] <- best_idx
+    xgb_grid$cv_rmse[i] <- eval_log[[test_col]][best_idx]
+  }
+})
+
+cat("XGBoost grid search time:", round(t_xgb_grid["elapsed"], 1), "seconds\n\n")
+
+# Show top 10
+xgb_grid %>%
+  arrange(cv_rmse) %>%
+  head(10)
+```
+
+```{r}
+# Best XGBoost configuration
+best_xgb <- xgb_grid %>% arrange(cv_rmse) %>% slice(1)
+cat("Best XGBoost hyperparameters:\n")
+cat("  eta:              ", best_xgb$eta, "\n")
+cat("  max_depth:        ", best_xgb$max_depth, "\n")
+cat("  subsample:        ", best_xgb$subsample, "\n")
+cat("  colsample_bytree: ", best_xgb$colsample_bytree, "\n")
+cat("  best_nrounds:     ", best_xgb$best_nrounds, "\n")
+cat("  CV RMSE:          ", round(best_xgb$cv_rmse, 4), "\n")
+```
+
+### Tuned XGBoost: Test Performance
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+# Retrain with best hyperparameters on full training data
+params_best <- list(
+  eta = best_xgb$eta,
+  max_depth = best_xgb$max_depth,
+  subsample = best_xgb$subsample,
+  colsample_bytree = best_xgb$colsample_bytree,
+  objective = "reg:squarederror",
+  eval_metric = "rmse"
+)
+
+xgb_tuned <- xgb.train(
+  params = params_best,
+  data = dtrain_reg,
+  nrounds = best_xgb$best_nrounds,
+  verbose = 0
+)
+
+yhat_xgb_tuned <- predict(xgb_tuned, dtest_reg)
+rmse_xgb_tuned <- sqrt(mean((test_df$logSalePrice - yhat_xgb_tuned)^2))
+cat("Tuned XGBoost test RMSE:", round(rmse_xgb_tuned, 4), "\n")
+cat("Baseline XGBoost test RMSE:", round(rmse_xgb, 4), "\n")
+```
+
+## Grid Search: Did Tuning Help?
+
+```{r}
+tuning_comparison <- data.frame(
+  Model = c("GBM (baseline)", "GBM (tuned)", "XGBoost (baseline)", "XGBoost (tuned)"),
+  Test_RMSE = round(c(rmse_gbm, rmse_gbm_tuned, rmse_xgb, rmse_xgb_tuned), 4),
+  Grid_Search_Time = c("—",
+                       paste0(round(t_gbm_grid["elapsed"], 1), "s"),
+                       "—",
+                       paste0(round(t_xgb_grid["elapsed"], 1), "s"))
+)
+tuning_comparison
+```
+
+::: {.callout-note}
+## Grid search takeaways
+
+1. **Tuning usually helps** — even small improvements in RMSE matter when multiplied across many predictions.
+2. **GBM grid search is slower** because each `cv.folds` run trains 5 models × 2000 trees for every combination. XGBoost's `xgb.cv()` with early stopping is faster because it stops training early when the error plateaus.
+3. **You don't need to search everything at once**: Start with a coarse grid (few values, wide range), find the best region, then zoom in with a finer grid. This is called **two-stage grid search**.
+4. **The grid above is small** (36 combinations). In practice you might try more values, but even this small grid shows the workflow clearly.
+:::
+
+---
+
+# Summary
+
+```{r}
+# Final comparison table
+final <- data.frame(
+  Task = c("Regression", "Regression", "Classification", "Classification"),
+  Model = c("GBM", "XGBoost", "GBM", "XGBoost"),
+  Metric = c("RMSE", "RMSE", "AUC", "AUC"),
+  Value = round(c(rmse_gbm, rmse_xgb, auc_gbm, auc_xgb), 4),
+  Training_Time = round(c(t_gbm["elapsed"], t_xgb["elapsed"],
+                          t_gbm_cls["elapsed"], t_xgb_cls["elapsed"]), 1)
+)
+final
+```
+
+::: {.callout-note}
+## Key Takeaways
+
+1. **Predictive accuracy is similar**: Both GBM and XGBoost use the same gradient boosting framework, so on the same data with similar hyperparameters, they produce comparable results.
+
+2. **XGBoost is faster**: The speed advantage becomes more pronounced with larger datasets. On this ~2,300-row dataset, the difference may be modest; on 100K+ rows it would be dramatic.
+
+3. **Different workflows**:
+   - GBM: Pass a formula + data frame → use `cv.folds` for tuning → `gbm.perf()` for best iteration
+   - XGBoost: Convert to matrix → create `xgb.DMatrix` → use `evals` + `early_stopping_rounds` → `xgb.attributes()` for best iteration
+
+4. **XGBoost has more tuning knobs**: `lambda`, `alpha`, and `colsample_bytree` give you additional regularization options beyond what GBM offers.
+
+5. **Data prep is the real work**: Both algorithms required the same data cleaning, feature selection, and train/test split. The modeling part is fast — the prep is where the effort goes.
+:::

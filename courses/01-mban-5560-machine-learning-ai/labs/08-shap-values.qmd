@@ -1,0 +1,390 @@
+---
+title: "<span style='color: red; font-size: 30px;'>SHAP Values for Random Forest</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+In the [Random Forest notebook](rf.qmd), we introduced **local importance** — a per-observation measure of how much each variable contributed to predicting a specific individual. We noted that local importance is essentially the un-averaged version of permutation importance (MDA): for each observation, it measures how much accuracy changed when a variable was permuted among the OOB samples.
+
+Local importance is practical and easy to compute, but it has some theoretical limitations. For instance, the local importance scores for an observation don't necessarily "add up" to anything meaningful — they don't sum to the prediction itself. **SHAP (SHapley Additive exPlanations)** addresses this by borrowing a concept from cooperative game theory: **Shapley values**. SHAP provides per-observation feature attributions that are theoretically grounded and satisfy several desirable properties.
+
+This notebook introduces SHAP values, explains the intuition behind them, and demonstrates how to compute and visualize them for Random Forest models using the same datasets from the RF notebook (Titanic for classification, Hitters for regression).
+
+# Shapley Values: The Game Theory Foundation
+
+## The Intuition
+
+Imagine three friends — Alice, Bob, and Charlie — work together on a group project and earn a grade of 90. The question is: **how should the credit be fairly divided among them?**
+
+One approach: look at what happens when you add each person to different team combinations:
+
+- **Alice alone** scores 60. **Bob alone** scores 55. **Charlie alone** scores 50.
+- **Alice + Bob** together score 75. **Alice + Charlie** score 70. **Bob + Charlie** score 65.
+- **All three** together score 90.
+
+To figure out Alice's fair contribution, we look at her **marginal contribution** in every possible coalition:
+
+| Coalition (without Alice) | Score without Alice | Score with Alice | Alice's marginal contribution |
+|---|---|---|---|
+| {} (nobody) | 0 | 60 | 60 |
+| {Bob} | 55 | 75 | 20 |
+| {Charlie} | 50 | 70 | 20 |
+| {Bob, Charlie} | 65 | 90 | 25 |
+
+Alice's **Shapley value** is the weighted average of these marginal contributions:
+
+$$\phi_{\text{Alice}} = \frac{1}{4}\left(\frac{1 \cdot 60}{1} + \frac{1 \cdot 20}{1} + \frac{1 \cdot 20}{1} + \frac{1 \cdot 25}{1}\right)$$
+
+More precisely, the Shapley formula weights each marginal contribution by the number of permutations in which that coalition order arises:
+
+$$\phi_i = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(|N|-|S|-1)!}{|N|!} \left[v(S \cup \{i\}) - v(S)\right]$$
+
+where $N$ is the set of all players, $S$ is a coalition not containing player $i$, and $v(S)$ is the value (score/prediction) achieved by coalition $S$.
+
+The key insight: **Shapley values are the unique allocation method that satisfies fairness axioms** (efficiency, symmetry, null player, additivity). No other method guarantees all four.
+
+## From Game Theory to Machine Learning
+
+The translation is straightforward:
+
+| Game Theory | Machine Learning |
+|---|---|
+| Players | Features (variables) |
+| Coalition | Subset of features used in prediction |
+| Payout (score) | Model prediction |
+| Shapley value | SHAP value (feature attribution) |
+
+For a specific observation, the SHAP value of feature $j$ tells you: **"How much did this feature shift the prediction away from the average prediction?"**
+
+If the average predicted survival probability across all passengers is 0.38, and a specific female, first-class passenger has a predicted probability of 0.82, then SHAP decomposes the difference:
+
+$$0.82 - 0.38 = \underbrace{0.25}_{\text{sex}} + \underbrace{0.12}_{\text{pclass}} + \underbrace{0.05}_{\text{age}} + \underbrace{0.02}_{\text{sibsp}} + \underbrace{0.00}_{\text{parch}}$$
+
+The SHAP values sum to exactly the difference between this observation's prediction and the baseline (average prediction). This is the **efficiency property** — and it's something local importance from `randomForest` does *not* guarantee.
+
+## Key Properties of SHAP Values
+
+::: {.callout-note}
+## Why SHAP over other methods?
+
+SHAP values are the **only** attribution method that simultaneously satisfies these four properties:
+
+1. **Efficiency (Local Accuracy):** The sum of all SHAP values for an observation equals the difference between its prediction and the average prediction: $f(x) = \phi_0 + \sum_{j=1}^{p} \phi_j(x)$, where $\phi_0$ is the baseline (mean prediction).
+
+2. **Symmetry:** If two features contribute equally to every possible coalition, they receive the same SHAP value. No feature gets unfairly favored.
+
+3. **Null Player (Dummy):** A feature that never changes the prediction in any coalition gets a SHAP value of exactly 0. Irrelevant features are correctly identified.
+
+4. **Additivity (Linearity):** For an ensemble model (like Random Forest, which averages many trees), the SHAP values of the ensemble equal the average of the SHAP values of the individual trees. This makes SHAP naturally compatible with ensemble methods.
+
+These properties are what make SHAP *theoretically* superior to permutation-based local importance, which doesn't guarantee any of them.
+:::
+
+## Computing SHAP Values in Practice
+
+Computing exact Shapley values requires evaluating all $2^p$ subsets of features — exponential in the number of features. For a dataset with 20 features, that's over 1 million subsets *per observation*. Two practical approaches exist:
+
+- **TreeSHAP** (Lundberg et al., 2020): A specialized algorithm that exploits the structure of decision trees to compute exact SHAP values in polynomial time. Available in Python's `shap` library and R's `treeshap` package.
+- **Kernel SHAP** (Lundberg & Lee, 2017): A model-agnostic approximation that works with *any* model by using a weighted linear regression approach. It samples feature coalitions rather than evaluating all of them, making it practical for any number of features.
+
+In this notebook, we use R's `kernelshap` package (model-agnostic Kernel SHAP) with `shapviz` for visualization. This combination works with any model, including `randomForest`.
+
+```{r, warning=FALSE, message=FALSE}
+# Install if needed:
+# install.packages(c("kernelshap", "shapviz"))
+```
+
+# SHAP for Classification: Titanic
+
+```{r, warning=FALSE, message=FALSE}
+# Load libraries
+library(randomForest)
+library(PASWR)
+library(kernelshap)
+library(shapviz)
+library(ggplot2)
+
+# Prepare data (same as rf.qmd)
+data(titanic3)
+df <- titanic3[, c("survived", "sex", "age", "pclass", "sibsp", "parch")]
+df$survived <- as.factor(titanic3$survived)
+df <- df[complete.cases(df), ]
+
+# Train the Random Forest model
+set.seed(42)
+rf_model <- randomForest(survived ~ ., data = df, ntree = 500)
+rf_model
+```
+
+## Computing SHAP Values
+
+The `kernelshap` package computes SHAP values by passing a model and a background dataset. For classification, we need to specify a custom predict function that returns the predicted probability for the class of interest.
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+# Prepare the feature matrix (exclude response)
+X <- df[, -1]
+
+# Define a predict function that returns P(survived = 1)
+pfun <- function(model, newdata) {
+  predict(model, newdata, type = "prob")[, "1"]
+}
+
+# Use a subsample as background data for efficiency
+set.seed(42)
+bg_idx <- sample(nrow(X), 200)  # Background sample
+bg <- X[bg_idx, ]
+
+# Compute Kernel SHAP values for a subset of observations
+# (computing for all 1046 observations takes time; we use 200 for demonstration)
+set.seed(42)
+explain_idx <- sample(nrow(X), 200)
+shap_values <- kernelshap(rf_model, X = X[explain_idx, ], bg_X = bg, pred_fun = pfun)
+
+# Create a shapviz object for visualization
+sv <- shapviz(shap_values)
+```
+
+::: {.callout-note}
+## What does `kernelshap()` return?
+
+The `kernelshap()` function returns an object containing SHAP values — a matrix with dimensions $n \times p$ (observations × features). Each cell $\phi_j(x_i)$ tells you how much feature $j$ shifted the prediction for observation $i$ away from the average prediction.
+
+The key property holds: for any observation $i$, the SHAP values sum to the difference between its prediction and the baseline:
+
+$$\hat{f}(x_i) = \phi_0 + \sum_{j=1}^{p} \phi_j(x_i)$$
+
+where $\phi_0$ is the average prediction across the background data. This additivity is what makes SHAP values interpretable — you can trace exactly how each feature pushed the prediction up or down from the baseline.
+
+**Background data (`bg_X`):** Kernel SHAP needs a reference dataset to define "missing" features. When evaluating a coalition that excludes feature $j$, the algorithm integrates over the background data's values for $j$. Using a random subsample (100–500 observations) is standard practice and keeps computation fast.
+:::
+
+## SHAP Summary Plot (Beeswarm)
+
+The **beeswarm plot** is the signature SHAP visualization. It shows the distribution of SHAP values for each feature across all observations, with color indicating the feature's actual value.
+
+```{r, fig.width=8, fig.height=5}
+sv_importance(sv, kind = "beeswarm") +
+  ggtitle("SHAP Beeswarm Plot — Titanic Classification")
+```
+
+**How to read this plot:**
+
+- Each **dot** represents one observation (passenger).
+- The **x-axis** shows the SHAP value: positive means the feature pushed the prediction *toward* class 1 (survived), negative means it pushed *toward* class 0 (deceased).
+- The **color** represents the actual value of the feature: red = high value, blue = low value. For categorical variables like `sex`, the encoding maps to factor levels.
+- Features are **sorted by importance** (total absolute SHAP value) from top to bottom.
+
+**What to look for:**
+
+- **`sex`**: There's a clear split — one group of dots far to the right (high SHAP, pushing toward survival) and another far to the left (pushing toward death). The color tells you which sex is which.
+- **`pclass`**: Low values (first class, blue dots) tend to have positive SHAP values (survival), while high values (third class, red dots) tend to have negative SHAP values.
+- **`age`**: A wider spread of SHAP values with some concentration of low-age (blue, young children) dots on the positive side.
+
+This single plot combines what you'd need **three separate tools** to see: variable importance (vertical ordering), direction of effect (left/right), and feature value dependence (color).
+
+## SHAP Importance Plot
+
+The SHAP importance plot shows the **mean absolute SHAP value** for each feature — a global importance measure derived from local SHAP values.
+
+```{r, fig.width=7, fig.height=4}
+sv_importance(sv, kind = "bar") +
+  ggtitle("SHAP Feature Importance — Titanic")
+```
+
+**Compare this with the MDI/MDA importance from `rf.qmd`.** The ranking should be similar (with `sex` on top), but the scale is different: SHAP importance is in units of the prediction (probability), while MDI is in Gini units and MDA is in accuracy units.
+
+## SHAP Dependence Plots
+
+SHAP dependence plots show how the SHAP value for a specific feature varies with the feature's actual value. They're analogous to Partial Dependence Plots (PDPs), but with a key difference.
+
+```{r, fig.width=7, fig.height=5}
+sv_dependence(sv, v = "age") +
+  ggtitle("SHAP Dependence Plot — Age")
+```
+
+**SHAP dependence vs. PDP:**
+
+- A **PDP** shows the *average* predicted value as you vary a feature — it's a single curve.
+- A **SHAP dependence plot** shows the SHAP value for *each individual observation* — it's a scatter plot. The vertical spread at any x-value reveals **interaction effects**: if other variables interact with age, different passengers of the same age will have different SHAP values.
+
+```{r, fig.width=7, fig.height=5}
+sv_dependence(sv, v = "pclass") +
+  ggtitle("SHAP Dependence Plot — Passenger Class")
+```
+
+```{r, fig.width=7, fig.height=5}
+sv_dependence(sv, v = "sex") +
+  ggtitle("SHAP Dependence Plot — Sex")
+```
+
+## Waterfall Plots: Explaining Individual Predictions
+
+One of SHAP's most powerful applications is explaining **why the model made a specific prediction** for a single observation. Waterfall plots show how each feature pushed the prediction from the baseline to the final value.
+
+```{r, fig.width=8, fig.height=5}
+# Explain the first observation in our explained set
+sv_waterfall(sv, row_id = 1) +
+  ggtitle("SHAP Waterfall — Observation 1")
+```
+
+**Reading the waterfall plot:**
+
+- The plot starts at the **baseline** (average prediction, $\phi_0$) at the bottom.
+- Each bar shows one feature's SHAP contribution: red bars push the prediction higher (toward survival), blue bars push it lower (toward death).
+- The **final prediction** is at the top — the sum of the baseline plus all SHAP values.
+- The feature values are shown on the y-axis labels, so you can see exactly *what* the model is reacting to.
+
+Let's look at a few more observations to see how explanations differ:
+
+```{r, fig.width=8, fig.height=5}
+# Explain observation 5
+sv_waterfall(sv, row_id = 5) +
+  ggtitle("SHAP Waterfall — Observation 5")
+```
+
+```{r, fig.width=8, fig.height=5}
+# Explain observation 10
+sv_waterfall(sv, row_id = 10) +
+  ggtitle("SHAP Waterfall — Observation 10")
+```
+
+::: {.callout-note}
+## SHAP waterfall vs. local importance
+
+Both SHAP waterfall plots and local importance from `randomForest` provide per-observation feature attributions. The key differences:
+
+| Feature | Local Importance (`localImp`) | SHAP Waterfall |
+|---|---|---|
+| **Values sum to prediction?** | No — values are accuracy changes, not prediction components | **Yes** — SHAP values sum exactly to $f(x) - \phi_0$ |
+| **Interpretation** | "How much did accuracy change when this variable was permuted?" | "How much did this variable shift the prediction from the average?" |
+| **Baseline** | No clear baseline | Average prediction ($\phi_0$) |
+| **Theoretical guarantees** | None (heuristic) | Efficiency, symmetry, null player, additivity |
+| **Visualization** | Typically a table or scatter plot | Waterfall, force plot — shows cumulative buildup of prediction |
+| **Computation** | Fast (built into `randomForest`) | Slower (requires `kernelshap`) |
+| **Sign interpretation** | Positive = variable helped accuracy; negative = variable hurt accuracy | Positive = pushed prediction higher; negative = pushed prediction lower |
+
+Both are useful. Local importance is quick and practical; SHAP is more principled when you need exact prediction decompositions.
+:::
+
+## SHAP Force Plot
+
+An alternative to the waterfall plot is the **force plot**, which shows the same information in a horizontal layout:
+
+```{r, fig.width=10, fig.height=3}
+sv_force(sv, row_id = 1) +
+  ggtitle("SHAP Force Plot — Observation 1")
+```
+
+# SHAP for Regression: Hitters
+
+SHAP works identically for regression — the only difference is that the y-axis and SHAP values are in units of the predicted outcome (log-salary) rather than probability.
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+library(ISLR)
+dfr <- na.omit(Hitters)
+dfr$Salary <- log(dfr$Salary)
+
+# Train the Random Forest regression model
+set.seed(42)
+rf_model_reg <- randomForest(Salary ~ ., data = dfr, ntree = 500)
+
+# Prepare features
+X_reg <- dfr[, -which(names(dfr) == "Salary")]
+
+# Background data (smaller for speed with 19 features)
+set.seed(42)
+bg_reg <- X_reg[sample(nrow(X_reg), 50), ]
+
+# Compute SHAP values for a subsample (19 features makes Kernel SHAP slower)
+set.seed(42)
+explain_idx_reg <- sample(nrow(X_reg), 100)
+shap_reg <- kernelshap(rf_model_reg, X = X_reg[explain_idx_reg, ], bg_X = bg_reg)
+
+# Create shapviz object
+sv_reg <- shapviz(shap_reg)
+```
+
+## Beeswarm Plot
+
+```{r, fig.width=8, fig.height=7}
+sv_importance(sv_reg, kind = "beeswarm", max_display = 10) +
+  ggtitle("SHAP Beeswarm Plot — Hitters (log-Salary)")
+```
+
+For regression, the x-axis shows how each feature shifts the predicted log-salary from the average. Features with wide horizontal spread are more important; the color shows whether high or low feature values drive the effect.
+
+## Importance Plot
+
+```{r, fig.width=7, fig.height=5}
+sv_importance(sv_reg, kind = "bar", max_display = 10) +
+  ggtitle("SHAP Feature Importance — Hitters")
+```
+
+Compare this ranking with the `IncNodePurity` (MDI) importance from `rf.qmd`. The top variables should be similar, but SHAP provides a more interpretable scale (units of log-salary).
+
+## Dependence Plots
+
+```{r, fig.width=7, fig.height=5}
+sv_dependence(sv_reg, v = "CRuns") +
+  ggtitle("SHAP Dependence — CRuns")
+```
+
+Compare this with the PDP for `CRuns` in `rf.qmd`. The overall trend should be similar, but the SHAP dependence plot shows individual observations (dots) rather than a single averaged curve, revealing heterogeneity and interaction effects.
+
+```{r, fig.width=7, fig.height=5}
+sv_dependence(sv_reg, v = "CHits") +
+  ggtitle("SHAP Dependence — CHits")
+```
+
+## Waterfall: Individual Prediction
+
+```{r, fig.width=8, fig.height=7}
+sv_waterfall(sv_reg, row_id = 1) +
+  ggtitle("SHAP Waterfall — First Player in Hitters")
+```
+
+This shows exactly how each feature contributed to this player's predicted log-salary, starting from the average prediction across all players.
+
+# SHAP vs. Local Importance vs. PDPs: When to Use What
+
+::: {.callout-note}
+## Summary comparison
+
+| Tool | Question it answers | Scope | Output |
+|---|---|---|---|
+| **MDI / MDA** (Global importance) | "Which variables matter most overall?" | Global (one score per variable) | Importance ranking |
+| **PDP** (Partial Dependence) | "How does this variable affect the prediction on average?" | Global (one curve per variable) | Effect curve |
+| **Local Importance** (`localImp`) | "Which variables mattered for this observation's accuracy?" | Local (per observation) | Accuracy change per variable |
+| **SHAP values** | "How did each variable shift this observation's prediction from the average?" | Local (per observation), aggregates to global | Prediction decomposition |
+
+**Use MDI/MDA** for quick feature selection and ranking.
+
+**Use PDPs** to understand the direction and shape of a variable's average effect.
+
+**Use local importance** for fast, practical per-observation diagnostics (built into `randomForest`).
+
+**Use SHAP** when you need:
+
+- Exact prediction decompositions (SHAP values sum to the prediction)
+- Theoretically grounded attributions with fairness guarantees
+- Rich visualizations (beeswarm, waterfall, force plots)
+- To communicate model behavior to stakeholders who need to understand *why* a specific prediction was made
+:::
+
+# Conclusion
+
+SHAP values provide a principled, game-theory-based framework for explaining machine learning predictions at the individual level. They extend the concept of local importance from `randomForest` by guaranteeing that feature attributions sum to the prediction, satisfy fairness axioms, and offer rich visualizations.
+
+The `kernelshap` package provides a model-agnostic implementation that works with any R model (including `randomForest`), while `shapviz` offers clean, publication-ready visualizations (beeswarm, waterfall, force, and dependence plots).
+
+While SHAP is more computationally expensive than the built-in local importance in `randomForest`, its theoretical properties and visualization capabilities make it the preferred choice when detailed, defensible model explanations are needed — particularly in regulated industries or stakeholder-facing applications.

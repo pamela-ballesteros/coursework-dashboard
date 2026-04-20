@@ -1,0 +1,685 @@
+---
+title: "<span style='color: red; font-size: 50px; font-weight: bold;'>Activation Functions</span>"
+subtitle: "Choosing the Right Nonlinearity for Neural Networks"
+author: "Dr. Aydede"
+date: today
+format: 
+  html:
+    embed-resources: true
+    code-background: true
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(patchwork)
+```
+
+Activation functions introduce **nonlinearity** into neural networks — without them, stacking layers would just produce another linear model. The choice of activation function affects how well a network learns, how fast it converges, and whether gradients flow properly during backpropagation.
+
+Key guidelines:
+
+- **ReLU and its variants** (Leaky ReLU, Parametric ReLU) are the default for hidden layers — they avoid the vanishing gradient problem and are computationally efficient.
+- **Sigmoid** is used in the output layer for binary classification (probability output).
+- **Softmax** is used in the output layer for multiclass classification.
+- **Experimentation is key** — the architecture of neural networks is part art, part science. Cross-validation helps determine what works best for your data.
+
+# Activation Functions
+
+## Sigmoid Activation Function
+
+The sigmoid activation function is defined as:
+
+$$
+\sigma(x) = \frac{1}{1 + e^{-x}}
+$$
+
+The sigmoid function squashes any input to the range $(0, 1)$, producing an S-shaped curve.
+
+```{r}
+x <- seq(-10, 10, by = 0.1)
+
+sigmoid <- function(x) {
+  1 / (1 + exp(-x))
+}
+
+ggplot(data.frame(x = x, y = sigmoid(x)), aes(x, y)) +
+  geom_line(color = "blue", linewidth = 1.3) +
+  labs(title = "Sigmoid Function", x = "Input (z)", y = "σ(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+::: {.callout-tip}
+## Best Use Cases in Neural Networks
+
+- **Output layer for binary classification**: Since it maps to $(0, 1)$, it directly outputs a probability — ideal for "yes/no" predictions (e.g., spam detection, churn prediction).
+- **Gate mechanisms in LSTMs/GRUs**: The sigmoid controls how much information flows through gates (forget gate, input gate) because its 0-to-1 range acts as a "valve."
+- **Avoid in hidden layers**: The sigmoid saturates for large positive/negative inputs (gradient → 0), causing the **vanishing gradient problem** (see Section 2). This makes training deep networks very slow or impossible.
+:::
+
+## Tanh Activation Function
+
+The tanh activation function is defined as:
+
+$$
+\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}
+$$
+
+The tanh function squashes the input to the range $(-1, 1)$. It is a rescaled version of sigmoid: $\tanh(x) = 2\sigma(2x) - 1$.
+
+```{r}
+tanh_fn <- function(x) {
+  (exp(x) - exp(-x)) / (exp(x) + exp(-x))
+}
+
+ggplot(data.frame(x = x, y = tanh_fn(x)), aes(x, y)) +
+  geom_line(color = "red", linewidth = 1.3) +
+  labs(title = "Tanh Function", x = "Input (z)", y = "tanh(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+::: {.callout-tip}
+## Best Use Cases in Neural Networks
+
+- **Hidden layers when zero-centered output matters**: Unlike sigmoid (which outputs only positive values), tanh is centered around zero. This means the next layer receives both positive and negative inputs, which helps gradient updates move in balanced directions and speeds up learning.
+- **Recurrent Neural Networks (RNNs)**: Tanh is the traditional activation for the hidden state in vanilla RNNs and inside LSTM cells (for the cell state update), because the $(-1, 1)$ range prevents values from growing unboundedly over time steps.
+- **Feature normalization layers**: When inputs are already centered around zero, tanh preserves that centering.
+- **Still suffers from vanishing gradients**: Like sigmoid, tanh saturates at the extremes (gradient → 0 for large $|x|$), though its gradients are stronger near zero (max derivative = 1.0 vs. sigmoid's 0.25).
+:::
+
+## ReLU Activation Function
+
+The ReLU (Rectified Linear Unit) activation function is defined as:
+
+$$
+\text{ReLU}(x) = \max(0, x)
+$$
+
+ReLU is the **most widely used activation function** in modern deep learning.
+
+```{r}
+relu <- function(x) {
+  pmax(0, x)
+}
+
+ggplot(data.frame(x = x, y = relu(x)), aes(x, y)) +
+  geom_line(color = "green4", linewidth = 1.3) +
+  labs(title = "ReLU Function", x = "Input (z)", y = "ReLU(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+::: {.callout-tip}
+## Best Use Cases in Neural Networks
+
+- **Default choice for hidden layers in deep networks**: ReLU doesn't saturate for positive inputs (gradient = 1), so gradients flow freely even through many layers. This is why deep learning took off — ReLU made training 10+ layer networks practical.
+- **Convolutional Neural Networks (CNNs)**: Almost all modern image recognition architectures (ResNet, VGG, etc.) use ReLU in their convolutional and fully connected layers.
+- **Feedforward networks for regression/classification**: Whenever you're unsure which activation to use in hidden layers, start with ReLU.
+- **Computationally efficient**: Just a `max(0, x)` operation — no exponentials, no division. This matters when you have millions of neurons.
+- **Watch out for the "dying ReLU" problem**: If a neuron's input is always negative, ReLU outputs 0 and the gradient is 0 — the neuron never updates again. It's "dead." This is addressed by Leaky ReLU.
+:::
+
+### Leaky ReLU
+
+The Leaky ReLU activation function is a variant that allows a small gradient when the input is negative:
+
+$$
+\text{Leaky ReLU}(x) = \max(0.01x, x)
+$$
+
+```{r}
+leaky_relu <- function(x) {
+  pmax(0.01 * x, x)
+}
+
+df_relu <- data.frame(
+  x = rep(x, 2),
+  y = c(relu(x), leaky_relu(x)),
+  Function = rep(c("ReLU", "Leaky ReLU"), each = length(x))
+)
+
+ggplot(df_relu, aes(x, y, color = Function)) +
+  geom_line(linewidth = 1.2) +
+  scale_color_manual(values = c("ReLU" = "green4", "Leaky ReLU" = "purple")) +
+  labs(title = "ReLU vs. Leaky ReLU", x = "Input (z)", y = "Output") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"))
+```
+
+::: {.callout-tip}
+## Best Use Cases in Neural Networks
+
+- **When dying ReLU is a concern**: In very deep networks or with high learning rates, many neurons can "die" with standard ReLU. The small negative slope (0.01) keeps the gradient alive.
+- **Generative Adversarial Networks (GANs)**: Leaky ReLU is commonly used in the discriminator network because dead neurons are particularly harmful in adversarial training.
+- **Deep feedforward networks**: When you notice many neurons outputting exactly zero during training, switching from ReLU to Leaky ReLU can improve performance.
+- **Parametric ReLU (PReLU)** goes further by **learning** the slope of the negative part from data, rather than fixing it at 0.01.
+:::
+
+## Softmax Activation Function
+
+The softmax activation function is defined as:
+
+$$
+\text{Softmax}(x_i) = \frac{e^{x_i}}{\sum_{j=1}^{n} e^{x_j}}
+$$
+
+Softmax converts a vector of raw scores (logits) into a **probability distribution**: all outputs are in $[0, 1]$ and sum to 1.
+
+```{r}
+softmax <- function(x) {
+  exp_x <- exp(x)
+  return(exp_x / sum(exp_x))
+}
+
+# Example: 3-class classification
+logits <- c(2.0, 1.0, 0.1)
+probabilities <- softmax(logits)
+
+result_df <- data.frame(
+  Class = paste("Class", 1:3),
+  Logit = logits,
+  Probability = round(probabilities, 4)
+)
+
+kable(result_df,
+      caption = "Softmax: From Logits to Probabilities",
+      col.names = c("Class", "Raw Logit", "Probability")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+::: {.callout-tip}
+## Best Use Cases in Neural Networks
+
+- **Output layer for multiclass classification**: When you need to predict one of $K$ classes (e.g., digit recognition with 10 classes, sentiment analysis with 3+ categories). The class with the highest probability is the prediction.
+- **Always paired with cross-entropy loss**: Softmax + cross-entropy is the standard combination for multiclass problems, analogous to sigmoid + binary cross-entropy for binary problems.
+- **Not used in hidden layers**: Softmax normalizes across all neurons in a layer, which creates dependencies between neurons — not desirable inside the network.
+:::
+
+## Summary: Choosing an Activation Function
+
+```{r, echo=FALSE}
+summary_df <- data.frame(
+  Function = c("Sigmoid", "Tanh", "ReLU", "Leaky ReLU", "Softmax"),
+  Formula = c("1/(1+e⁻ˣ)", "(eˣ-e⁻ˣ)/(eˣ+e⁻ˣ)", "max(0, x)", "max(0.01x, x)", "eˣⁱ / Σeˣʲ"),
+  Range = c("(0, 1)", "(-1, 1)", "[0, ∞)", "(-∞, ∞)", "[0, 1], sums to 1"),
+  Where_To_Use = c(
+    "Output (binary), LSTM gates",
+    "Hidden layers (RNNs), LSTM cell state",
+    "Hidden layers (default for deep nets)",
+    "Hidden layers (when ReLU neurons die)",
+    "Output (multiclass)"
+  ),
+  Gradient_Issue = c(
+    "Vanishing gradient",
+    "Vanishing gradient (less severe)",
+    "Dying ReLU",
+    "None major",
+    "N/A (output only)"
+  )
+)
+
+kable(summary_df,
+      caption = "Activation Function Cheat Sheet",
+      col.names = c("Function", "Formula", "Output Range", "Best Use", "Known Issue")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(4, color = "darkblue")
+```
+
+
+# What is the Vanishing Gradient Problem?
+
+During backpropagation, gradients are propagated backward through the network using the **chain rule**. At each layer, the gradient is **multiplied by the derivative of that layer's activation function**. If these derivatives are small, the gradient **shrinks exponentially** as it passes through many layers — and the early layers barely learn at all.
+
+This is the **vanishing gradient problem**.
+
+## Why Sigmoid Causes It: A Visual Explanation
+
+The key insight is in the **derivative** of the sigmoid function. Let's look at it:
+
+$$
+\sigma'(z) = \sigma(z) \cdot (1 - \sigma(z))
+$$
+
+```{r}
+sigmoid_deriv <- function(x) {
+  s <- sigmoid(x)
+  s * (1 - s)
+}
+
+p1 <- ggplot(data.frame(x = x, y = sigmoid(x)), aes(x, y)) +
+  geom_line(color = "blue", linewidth = 1.3) +
+  geom_hline(yintercept = c(0, 1), linetype = "dashed", alpha = 0.3) +
+  labs(title = "Sigmoid Function", x = "z", y = "σ(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 13, face = "bold"))
+
+p2 <- ggplot(data.frame(x = x, y = sigmoid_deriv(x)), aes(x, y)) +
+  geom_line(color = "red", linewidth = 1.3) +
+  geom_hline(yintercept = 0.25, linetype = "dashed", color = "red", alpha = 0.5) +
+  annotate("text", x = 5, y = 0.27, label = "Max = 0.25", color = "red", size = 4) +
+  labs(title = "Sigmoid Derivative", x = "z", y = "σ'(z)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 13, face = "bold"))
+
+p1 + p2 + plot_annotation(
+  title = "The Sigmoid's Gradient Is Always ≤ 0.25",
+  subtitle = "For large |z|, the derivative approaches zero — the gradient vanishes",
+  theme = theme(plot.title = element_text(size = 14, face = "bold"))
+)
+```
+
+**Two critical observations:**
+
+1. The **maximum** value of $\sigma'(z)$ is **0.25** (at $z = 0$). It can never be larger.
+2. For large $|z|$ (i.e., when the neuron is saturated), $\sigma'(z) \approx 0$.
+
+This means that **even in the best case**, each sigmoid layer shrinks the gradient by at least 75%.
+
+## Gradient Decay Through Layers: A Numerical Example
+
+Consider a simple 4-layer network where each layer uses sigmoid activation. During backpropagation, the gradient at layer $l$ involves multiplying the activation derivatives across all subsequent layers:
+
+$$
+\frac{\partial L}{\partial w_1} \propto \sigma'(z_1) \cdot \sigma'(z_2) \cdot \sigma'(z_3) \cdot \sigma'(z_4)
+$$
+
+**Best case** (all derivatives at maximum = 0.25):
+
+$$
+0.25 \times 0.25 \times 0.25 \times 0.25 = 0.25^4 = 0.0039
+$$
+
+The gradient reaching the first layer is **less than 0.4%** of the original signal. In a 10-layer network: $0.25^{10} \approx 0.00000095$ — essentially zero.
+
+Let's visualize this:
+
+```{r}
+layers <- 1:15
+
+# Best case: sigmoid derivative always at maximum (0.25)
+grad_sigmoid_best <- 0.25^layers
+
+# Realistic case: sigmoid derivative around 0.15 (common in practice)
+grad_sigmoid_real <- 0.15^layers
+
+# ReLU: derivative is 1 for positive inputs
+grad_relu <- rep(1, length(layers))
+
+grad_df <- data.frame(
+  Layer = rep(layers, 3),
+  Gradient = c(grad_sigmoid_best, grad_sigmoid_real, grad_relu),
+  Activation = rep(c("Sigmoid (best case: 0.25)", 
+                      "Sigmoid (realistic: 0.15)", 
+                      "ReLU"), each = length(layers))
+)
+
+ggplot(grad_df, aes(x = Layer, y = Gradient, color = Activation)) +
+  geom_line(linewidth = 1.3) +
+  geom_point(size = 2) +
+  scale_y_log10(labels = scales::scientific) +
+  scale_x_continuous(breaks = layers) +
+  scale_color_manual(values = c("Sigmoid (best case: 0.25)" = "blue", 
+                                 "Sigmoid (realistic: 0.15)" = "red",
+                                 "ReLU" = "green4")) +
+  labs(title = "Gradient Magnitude vs. Network Depth",
+       subtitle = "Sigmoid gradients vanish exponentially — ReLU gradients stay constant",
+       x = "Number of Layers", y = "Gradient Magnitude (log scale)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position = "bottom")
+```
+
+This is why **deep networks with sigmoid activations are nearly impossible to train** — the first few layers receive vanishingly small gradients and their weights barely change.
+
+## The Chain Rule: Why Gradients Multiply
+
+Before we trace through a numerical example, we need to understand **the chain rule** — the mathematical engine behind backpropagation.
+
+The chain rule says: if a quantity depends on another through a **chain of functions**, the overall derivative is the **product of derivatives** along the chain.
+
+**Simple example:** If $y = f(g(x))$, then:
+
+$$
+\frac{dy}{dx} = f'(g(x)) \cdot g'(x)
+$$
+
+**In a neural network**, each prediction passes through a chain:
+
+$$
+\text{weight } w \;\xrightarrow{\text{linear}}\; z = wx + b \;\xrightarrow{\text{activation}}\; a = \sigma(z) \;\xrightarrow{\text{loss}}\; L
+$$
+
+To find how the loss $L$ changes when we adjust $w$, we apply the chain rule along this path:
+
+$$
+\frac{\partial L}{\partial w} = \frac{\partial L}{\partial a} \cdot \frac{\partial a}{\partial z} \cdot \frac{\partial z}{\partial w}
+$$
+
+Each term is a link in the chain:
+
+| Link | Derivative | What it measures |
+|------|-----------|-----------------|
+| Loss → Activation output | $\frac{\partial L}{\partial a}$ | How the loss changes with the neuron's output |
+| Activation output → Weighted sum | $\frac{\partial a}{\partial z} = \sigma'(z)$ | How the activation changes with its input (**this is where vanishing happens**) |
+| Weighted sum → Weight | $\frac{\partial z}{\partial w} = x$ | How the weighted sum changes with the weight (simply the input) |
+
+The gradient is the **product** of all three. If any one term is tiny, the entire gradient is tiny.
+
+## Concrete Walkthrough: Single Neuron
+
+Let's trace through the chain rule with actual numbers. Consider a single neuron with sigmoid activation:
+
+- Input: $x = 3$, Weight: $w = 2$, Bias: $b = 0$, Target: $y = 0.5$
+- Loss function: $L = \frac{1}{2}(y - \sigma(z))^2$
+
+### Step 1: Forward Pass
+
+```{r}
+x_val <- 3
+w_val <- 2
+b_val <- 0
+y_val <- 0.5
+
+# Forward pass
+z_val <- w_val * x_val + b_val
+sigma_val <- sigmoid(z_val)
+loss_val <- 0.5 * (y_val - sigma_val)^2
+
+forward_df <- data.frame(
+  Step = c("Weighted sum", "Activation", "Loss"),
+  Formula = c("z = w·x + b", "a = σ(z)", "L = ½(y - a)²"),
+  Substitution = c(
+    sprintf("z = %d × %d + %d", w_val, x_val, b_val),
+    sprintf("a = σ(%d)", z_val),
+    sprintf("L = ½(%.1f - %.4f)²", y_val, sigma_val)
+  ),
+  Result = c(
+    sprintf("%d", z_val),
+    sprintf("%.6f  (nearly 1 — saturated!)", sigma_val),
+    sprintf("%.6f", loss_val)
+  )
+)
+
+kable(forward_df,
+      caption = "Forward Pass: Computing the Prediction and Loss",
+      col.names = c("Step", "Formula", "Substitution", "Result")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+Notice that $\sigma(6) = `r round(sigma_val, 4)`$ — the sigmoid is **nearly saturated** at 1. This is where trouble begins.
+
+### Step 2: Backward Pass (Chain Rule)
+
+Now we compute $\frac{\partial L}{\partial w}$ using the chain rule:
+
+$$
+\frac{\partial L}{\partial w} = \underbrace{\frac{\partial L}{\partial a}}_{\text{(i)}} \cdot \underbrace{\frac{\partial a}{\partial z}}_{\text{(ii)}} \cdot \underbrace{\frac{\partial z}{\partial w}}_{\text{(iii)}}
+$$
+
+For our loss function $L = \frac{1}{2}(y - a)^2$ and sigmoid activation $a = \sigma(z)$:
+
+- **(i)** $\frac{\partial L}{\partial a} = -(y - a) = a - y$
+- **(ii)** $\frac{\partial a}{\partial z} = \sigma(z)(1 - \sigma(z))$ — this is the sigmoid derivative
+- **(iii)** $\frac{\partial z}{\partial w} = x$
+
+```{r}
+dL_da <- sigma_val - y_val
+da_dz <- sigma_val * (1 - sigma_val)
+dz_dw <- x_val
+gradient <- dL_da * da_dz * dz_dw
+
+backward_df <- data.frame(
+  Link = c("(i)  Loss → Output", "(ii) Output → Weighted sum", "(iii) Weighted sum → Weight"),
+  Derivative = c("∂L/∂a = a − y", "∂a/∂z = σ(z)(1−σ(z))", "∂z/∂w = x"),
+  Substitution = c(
+    sprintf("%.6f − %.1f", sigma_val, y_val),
+    sprintf("%.6f × (1 − %.6f)", sigma_val, sigma_val),
+    sprintf("%d", x_val)
+  ),
+  Value = c(
+    sprintf("%.6f", dL_da),
+    sprintf("%.8f  ← TINY!", da_dz),
+    sprintf("%d", dz_dw)
+  )
+)
+
+kable(backward_df,
+      caption = "Backward Pass: Each Link in the Chain Rule",
+      col.names = c("Chain Link", "Derivative", "Substitution", "Value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(4, color = "red")
+```
+
+**The final gradient** — the product of all three links:
+
+$$
+\frac{\partial L}{\partial w} = `r sprintf("%.6f", dL_da)` \times `r sprintf("%.8f", da_dz)` \times `r dz_dw` = `r sprintf("%.2e", gradient)`
+$$
+
+The gradient is essentially **zero** ($`r sprintf("%.2e", gradient)`$). The culprit is link (ii): the sigmoid derivative is $`r sprintf("%.8f", da_dz)`$ because $\sigma(6) \approx `r round(sigma_val, 4)`$ is nearly saturated. **The chain rule multiplied three numbers, and one was almost zero — killing the entire gradient.**
+
+## What If We Used ReLU Instead?
+
+Same setup ($x = 3$, $w = 2$, $z = 6$), but with ReLU activation instead of sigmoid:
+
+```{r}
+# ReLU forward pass
+relu_val <- max(0, z_val)
+loss_relu <- 0.5 * (y_val - relu_val)^2
+
+# ReLU backward pass (chain rule)
+relu_deriv <- ifelse(z_val > 0, 1, 0)
+dL_da_relu <- relu_val - y_val
+gradient_relu <- dL_da_relu * relu_deriv * x_val
+
+# Side-by-side comparison
+comparison_df <- data.frame(
+  Chain_Link = c(
+    "(i) ∂L/∂a",
+    "(ii) ∂a/∂z  (activation derivative)",
+    "(iii) ∂z/∂w",
+    "Product: ∂L/∂w  (final gradient)"
+  ),
+  Sigmoid = c(
+    sprintf("%.6f", dL_da),
+    sprintf("%.8f", da_dz),
+    sprintf("%d", dz_dw),
+    sprintf("%.2e", gradient)
+  ),
+  ReLU = c(
+    sprintf("%.1f", dL_da_relu),
+    sprintf("%d", relu_deriv),
+    sprintf("%d", dz_dw),
+    sprintf("%.1f", gradient_relu)
+  )
+)
+
+kable(comparison_df,
+      caption = "Chain Rule Comparison: Sigmoid vs. ReLU (with z = 6)",
+      col.names = c("Chain Link", "Sigmoid", "ReLU")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "red") %>%
+  column_spec(3, color = "green")
+```
+
+The difference is dramatic. With sigmoid, the activation derivative (link ii) is $`r sprintf("%.8f", da_dz)`$ — it **crushes** the gradient. With ReLU, the derivative is simply **1** for any positive input — the gradient passes through untouched. In a deep network, this difference compounds at every layer.
+
+## Stacking Multiple Layers: Where It Really Hurts
+
+The single-neuron example above showed how the sigmoid derivative crushes the gradient at **one** layer. But real networks have many layers, and the chain rule **multiplies** derivatives across all of them. This is where the problem becomes devastating.
+
+**What the simulation does:**
+
+1. We build a simple 5-layer network with random weights (between 0.5 and 1.5)
+2. We do a **forward pass** through all 5 layers — computing the weighted sum and activation at each layer
+3. We then do a **backward pass** — starting from the output (layer 5) and propagating the gradient back to layer 1
+4. At each layer, the cumulative gradient is: $\text{grad}_l = \text{grad}_{l+1} \times \sigma'(z_l) \times w_{l+1}$ (for sigmoid) or $\text{grad}_l = \text{grad}_{l+1} \times \mathbb{1}(z_l > 0) \times w_{l+1}$ (for ReLU)
+5. We compare how much gradient reaches each layer for sigmoid vs. ReLU
+
+```{r}
+set.seed(42)
+
+n_layers <- 5
+
+# Initialize random weights and inputs for each layer
+weights <- runif(n_layers, min = 0.5, max = 1.5)
+inputs <- runif(n_layers, min = -2, max = 2)
+
+# Forward pass through sigmoid layers
+z_sigmoid <- numeric(n_layers)
+a_sigmoid <- numeric(n_layers)
+z_sigmoid[1] <- weights[1] * inputs[1]
+a_sigmoid[1] <- sigmoid(z_sigmoid[1])
+
+for (i in 2:n_layers) {
+  z_sigmoid[i] <- weights[i] * a_sigmoid[i - 1]
+  a_sigmoid[i] <- sigmoid(z_sigmoid[i])
+}
+
+# Compute gradient flowing backward through sigmoid layers
+grad_sigmoid <- numeric(n_layers)
+grad_sigmoid[n_layers] <- sigmoid(z_sigmoid[n_layers]) * (1 - sigmoid(z_sigmoid[n_layers]))
+cumulative_sigmoid <- grad_sigmoid[n_layers]
+
+for (i in (n_layers - 1):1) {
+  layer_grad <- sigmoid(z_sigmoid[i]) * (1 - sigmoid(z_sigmoid[i]))
+  cumulative_sigmoid <- cumulative_sigmoid * layer_grad * weights[i + 1]
+  grad_sigmoid[i] <- cumulative_sigmoid
+}
+
+# Same for ReLU
+z_relu <- numeric(n_layers)
+a_relu <- numeric(n_layers)
+z_relu[1] <- weights[1] * inputs[1]
+a_relu[1] <- max(0, z_relu[1])
+
+for (i in 2:n_layers) {
+  z_relu[i] <- weights[i] * a_relu[i - 1]
+  a_relu[i] <- max(0, z_relu[i])
+}
+
+grad_relu <- numeric(n_layers)
+grad_relu[n_layers] <- ifelse(z_relu[n_layers] > 0, 1, 0)
+cumulative_relu <- grad_relu[n_layers]
+
+for (i in (n_layers - 1):1) {
+  layer_grad <- ifelse(z_relu[i] > 0, 1, 0)
+  cumulative_relu <- cumulative_relu * layer_grad * weights[i + 1]
+  grad_relu[i] <- cumulative_relu
+}
+
+# Visualize
+stack_df <- data.frame(
+  Layer = rep(n_layers:1, 2),
+  Gradient = c(grad_sigmoid[n_layers:1], grad_relu[n_layers:1]),
+  Activation = rep(c("Sigmoid", "ReLU"), each = n_layers)
+)
+
+ggplot(stack_df, aes(x = factor(Layer), y = abs(Gradient), fill = Activation)) +
+  geom_col(position = "dodge", width = 0.6) +
+  scale_fill_manual(values = c("Sigmoid" = "tomato", "ReLU" = "green4")) +
+  scale_y_log10(labels = scales::scientific) +
+  labs(title = "Gradient Magnitude at Each Layer (Backpropagation)",
+       subtitle = "Sigmoid gradients decay rapidly — ReLU maintains gradient flow",
+       x = "Layer (backward from output)", y = "Gradient Magnitude (log scale)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position = "bottom")
+```
+
+**How to read this plot:**
+
+- The **x-axis** shows the layers ordered from the output (layer 5, where the gradient starts) backward to the input (layer 1, the earliest layer).
+- The **y-axis** (log scale) shows how large the gradient is at each layer — this is the signal that tells each layer's weights how to update.
+- **Red bars (Sigmoid)**: The gradient shrinks dramatically as it flows backward. By the time it reaches layers 1–2, it's orders of magnitude smaller than at layer 5. These early layers are essentially **frozen** — they receive almost no learning signal.
+- **Green bars (ReLU)**: The gradient stays roughly the same magnitude across all layers. Every layer — including the earliest ones — receives a healthy gradient and can learn effectively.
+
+Let's see the exact numbers:
+
+```{r}
+gradient_table <- data.frame(
+  Layer = paste("Layer", 1:n_layers),
+  Sigmoid = sprintf("%.2e", grad_sigmoid),
+  ReLU = sprintf("%.4f", grad_relu),
+  Ratio = sprintf("%.0f×", abs(grad_relu / grad_sigmoid))
+)
+
+kable(gradient_table,
+      caption = "Cumulative Gradient at Each Layer",
+      col.names = c("Layer", "Sigmoid Gradient", "ReLU Gradient", "ReLU / Sigmoid")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "red") %>%
+  column_spec(3, color = "green")
+```
+
+The table shows the core problem: by layer 1, the sigmoid gradient has decayed to a tiny fraction of what it was at the output. The ReLU gradient, by contrast, passes through each layer with derivative = 1 (for positive inputs), so it maintains its strength. This is why **switching from sigmoid to ReLU in hidden layers was one of the key breakthroughs** that made deep learning practical.
+
+## Mitigating the Vanishing Gradient Problem
+
+```{r, echo=FALSE}
+mitigation_df <- data.frame(
+  Strategy = c(
+    "Use ReLU / Leaky ReLU",
+    "Proper Weight Initialization",
+    "Batch Normalization",
+    "Residual Connections (ResNets)",
+    "LSTM / GRU (for sequences)"
+  ),
+  How_It_Helps = c(
+    "Gradient = 1 for positive inputs — no shrinkage through layers",
+    "He/Xavier initialization keeps activations in a good range, preventing early saturation",
+    "Normalizes layer inputs, keeping them in the region where gradients are strong",
+    "Skip connections allow gradients to bypass layers, maintaining signal strength",
+    "Gates control gradient flow explicitly, preventing it from vanishing over long sequences"
+  ),
+  When_To_Use = c(
+    "Default for hidden layers in feedforward/CNN networks",
+    "Always — use He init with ReLU, Xavier with sigmoid/tanh",
+    "Deep networks (10+ layers) to stabilize training",
+    "Very deep networks (50+ layers) — enables training of 100+ layer networks",
+    "Sequential data (text, time series) instead of vanilla RNNs"
+  )
+)
+
+kable(mitigation_df,
+      caption = "Strategies to Mitigate the Vanishing Gradient Problem",
+      col.names = c("Strategy", "How It Helps", "When to Use")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(1, bold = TRUE, color = "darkblue")
+```
+
+The vanishing gradient problem was one of the main reasons deep learning stalled in the 1990s. The combination of ReLU activations, proper initialization, and architectural innovations (batch normalization, residual connections) is what made training very deep networks practical — and kicked off the modern deep learning era.
+
+---
+
+### References
+
+- Goodfellow, I., Bengio, Y., & Courville, A. (2016). *Deep Learning*. MIT Press. Chapters 6–8.
+- Glorot, X. & Bengio, Y. (2010). Understanding the difficulty of training deep feedforward neural networks. *AISTATS*.
+- He, K. et al. (2015). Delving deep into rectifiers: Surpassing human-level performance on ImageNet classification. *ICCV*.
+
+### R Session Information
+
+```{r}
+sessionInfo()
+```

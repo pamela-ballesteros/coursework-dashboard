@@ -1,0 +1,299 @@
+---
+title: "<span style='color: red; font-size: 30px;'>Bootstrap Aggregating - BAGGING</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+CART models are known for their sensitivity to small changes in the training data, leading to different splits and consequently, a **high variability in the model predictions**. This variance makes them unstable, especially when the data set is not large enough or when it contains many features that may not all be relevant to the prediction task.
+
+Bagging, short for bootstrap aggregation, significantly improves the performance of Classification and Regression Trees (CART) by addressing their high variance. Created by Leo Breiman in 1996, bagging is a simple and powerful ensemble method that builds multiple models (typically, decision trees) from different bootstrap samples of the training data and then combines their predictions by averaging (for regression) or voting (for classification).
+
+In this notebook, we will implement bagging from scratch and compare its performance with a single decision tree on the Titanic dataset. 
+
+# Bagging Algorithm
+
+The bagging algorithm can be summarized as follows:
+
+1. **Bootstrap Sampling**: Create $B$ bootstrap samples from the training data.
+2. **Model Fitting**: Train a model on each bootstrap sample.
+3. **Prediction**: Combine the predictions of the $B$ models by averaging (for regression) or voting (for classification).
+
+```{r, warning=FALSE, message = FALSE}
+library(ROCR)
+library(PASWR)
+library(rpart)
+library(rpart.plot)
+data(titanic3)
+str(titanic3)
+```
+
+```{r}
+anyNA(titanic3)
+apply(is.na(titanic3), 2, sum)
+```
+
+```{r}
+# This is for a set of colors in each tree
+clr = c("pink","red","blue","yellow","darkgreen",
+        "orange","brown","purple","darkblue")
+
+n = nrow(titanic3)
+par(mfrow = c(3, 3))
+
+for(i in 1:9) {  # Here B = 9
+  set.seed(i*2)
+  idx = sample(n, n, replace = TRUE) #Bootstrap sampling with replacement
+  tr <- titanic3[idx, ]
+  cart =  rpart(survived ~ sex + age + pclass + sibsp + parch,
+                cp = 0, data = tr, method = "class") #unpruned
+  prp(cart, type = 1, extra = 1, box.col = clr[i])
+}
+```
+
+Here B = 9, so we have 9 trees. We can see that each tree is different because of the bootstrap sampling. What are we going to do next? We will combine the predictions of these 9 trees by voting. 
+
+In **regression trees**, the prediction will be **the average of the resulting predictions**. In **classification trees**, we **take a majority vote**.
+
+# Single tree on Titanic dataset
+
+```{r}
+#test/train split
+set.seed(1)
+ind <- sample(nrow(titanic3), nrow(titanic3) * 0.8)
+train <- titanic3[ind, ]
+test <- titanic3[-ind, ]
+
+#Single tree
+cart <-  rpart(survived ~ sex + age + pclass + sibsp + parch,
+                data = train, method = "class") #Pruned
+phat1 <- predict(cart, test, type = "prob") 
+
+#AUC
+pred_rocr <- prediction(phat1[,2], test$survived)
+auc_ROCR <- performance(pred_rocr, measure = "auc")
+auc_ROCR@y.values[[1]]
+```
+
+Let's apply bagging to the same train set and compare its performance on the same test set relative to the single decision tree we had above.
+
+# Bagging on Titanic dataset
+
+```{r}
+B = 100 # number of trees
+
+phat2 <- matrix(0, B, nrow(test))
+
+# Loops
+for(i in 1:B){  
+  set.seed(i) # to make it reproducible
+  idx <- sample(nrow(train), nrow(train), replace = TRUE)
+  dt <- train[idx, ]
+ 
+  cart_B <- rpart(survived ~ sex + age + pclass + sibsp + parch,
+                cp = 0, data = dt, method = "class") # unpruned
+  phat2[i,] <- predict(cart_B, test, type = "prob")[, 2]
+}
+
+dim(phat2)
+```
+
+Each row of `phat2` contains the predictions of a tree. We will take the average of these predictions to get the final prediction. Since we have 100 trees, we will have 100 predictions for each observation of the test set, which has 262 observations. Hence its dimension is 100 x 262.
+
+```{r}
+# Take the average
+phat_f <- colMeans(phat2)
+
+#AUC
+pred_rocr <- prediction(phat_f, test$survived)
+auc_ROCR <- performance(pred_rocr, measure = "auc")
+auc_ROCR@y.values[[1]]
+```
+
+Hence, we have a slight improvement over a single tree. We can see how the number of trees (B) would cumulatively increases AUC (reduces MSPE in regressions).
+
+```{r}
+B = 300 
+
+phat3 <- matrix(0, B, nrow(test))
+AUC <- c()
+
+for (i in 1:B) {
+  set.seed(i) 
+  idx <- sample(nrow(train), nrow(train), replace = TRUE)
+  dt <- train[idx,]
+  
+  fit <- rpart(
+    survived ~ sex + age + pclass + sibsp + parch,
+    cp = 0,
+    data = dt,
+    method = "class"
+  )
+  
+  phat3[i, ] <- predict(fit, test, type = "prob")[, 2]
+  
+  phat_f <- colMeans(phat3)
+  
+  #AUC
+  pred_rocr <- prediction(phat_f, test$survived)
+  auc_ROCR <- performance(pred_rocr, measure = "auc")
+  AUC[i] <- auc_ROCR@y.values[[1]]
+}
+
+plot(AUC, type = "l", col = "red",
+     xlab = "B - Number of trees",
+     lwd = 2)
+```
+
+# Application with multiple splits
+
+```{r, cache=TRUE, warning=FALSE, message = FALSE}
+library(foreach)
+library(doParallel)
+
+no_cores <- detectCores() - 1  
+registerDoParallel(cores = no_cores)
+
+B <- 100
+AUC <- numeric(100)  # Preallocate memory for speed
+
+for (i in 1:100) {
+  
+  set.seed(i)
+  ind <- sample(nrow(titanic3), nrow(titanic3) * 0.8)
+  train <- titanic3[ind, ]
+  test <- titanic3[-ind, ]
+
+  # Use foreach for the inner loop
+  phat2 <- foreach(b = 1:B, .combine = 'cbind') %dopar% {
+    set.seed(b)  # Ensure reproducibility
+    idx <- sample(nrow(train), nrow(train), replace = TRUE)
+    dt <- train[idx, ]
+   
+    cart_B <- rpart(survived ~ sex + age + pclass + sibsp + parch,
+                  cp = 0, data = dt, method = "class")  # unpruned
+    predict(cart_B, test, type = "prob")[, 2]
+  }
+
+  # Take the average
+  phat_f <- rowMeans(phat2)
+  
+  # AUC
+  pred_rocr <- prediction(phat_f, test$survived)
+  auc_ROCR <- performance(pred_rocr, measure = "auc")
+  AUC[i] <- auc_ROCR@y.values[[1]]
+}
+
+stopImplicitCluster()
+```
+
+Let's plot AUC with its mean and 95% confidence interval.
+
+```{r}
+# Plot AUC with its mean and 95% confidence interval
+plot(AUC, col = "red",
+     xlab = "B - Number of trees",
+     lwd = 2)
+abline(h = mean(AUC), col = "blue", lwd = 2)
+abline(h = quantile(AUC, 0.025), col = "green", lwd = 2, lty = 2)
+abline(h = quantile(AUC, 0.975), col = "green", lwd = 2, lty = 2)
+```
+
+# Tuning?
+
+Bagging (Bootstrap AGGregatING) does not require the same level of hyperparameter tuning as some other machine learning models, such as selecting the number of layers in a neural network or the depth of individual trees in a random forest. The primary parameter in bagging is the number of bootstrap samples (or trees in the forest, B), which often does not need fine-tuning beyond ensuring it is sufficiently large. This characteristic makes bagging a very robust method with minimal setup requirements.
+
+Regarding cross-validation, bagging inherently includes a form of it through the use of bootstrap samples. Each tree is trained on a random subset of the data (with replacement), making it unnecessary to use cross-validation to prevent overfitting or to estimate model accuracy reliably. The out-of-bag (OOB) error provides a handy estimate of prediction error (generalization error) without the need for a separate validation set or cross-validation, as the OOB samples act as a built-in test set for each tree.
+
+Hence, instead of running two loops as we seen in the previous example, we can have one split and use the OOB error to estimate the generalization error.
+
+## OOB AUC
+
+Here we will use the OOB samples to estimate the AUC.
+
+```{r, cache=TRUE, warning=FALSE, message = FALSE}
+df <- titanic3
+
+B <- 100
+pred <- matrix(NA, nrow(df), B)
+
+for (i in 1:B) {
+    set.seed(i)  # Ensure reproducibility
+    train_idx <- sample(nrow(df), nrow(df), replace = TRUE)
+    oob_idx <- setdiff(1:nrow(df), train_idx)
+    train <- df[train_idx, ]
+    oob <- df[oob_idx, ]
+   
+    cart_B <- rpart(survived ~ sex + age + pclass + sibsp + parch,
+                  cp = 0, data = train, method = "class")  # unpruned
+    pred[oob_idx, i] <- predict(cart_B, oob, type = "prob")[, 2]
+}
+
+phat_f <- rowMeans(pred, na.rm = TRUE)
+
+pred_rocr <- prediction(phat_f, df$survived)
+auc_ROCR <- performance(pred_rocr, measure = "auc")
+auc_ROCR@y.values[[1]]
+```
+
+## OOB error rate
+
+Here, we will use the OOB samples to estimate the error rate, which is the proportion of misclassified observations.  Although we show the classification error as calculated by 1 - accuracy, it can also be shown separately for each classes. 
+
+```{r, cache=TRUE, warning=FALSE, message = FALSE}
+df <- titanic3
+B <- 100
+n <- nrow(df)
+pred <- matrix(NA, n, B)
+
+for (i in 1:B) {
+  set.seed(i)
+  train_idx <- sample(n, replace = TRUE)
+  oob_idx <- setdiff(1:n, train_idx)
+  train <- df[train_idx, ]
+  oob <- df[oob_idx, ]
+  
+  # Train model on bootstrap sample
+  cart_B <- rpart(survived ~ sex + age + pclass + sibsp + parch,
+                  cp = 0, data = train, method = "class")
+  
+  # Predict for OOB observations
+  oob_pred <- predict(cart_B, oob, type = "class")
+  oob_pred01 <- ifelse(oob_pred == 1, 1, 0)
+  
+  # Store OOB predictions
+  pred[oob_idx, i] <-  oob_pred01
+}
+
+# Calculate OOB error for each tree
+oob_err <- numeric(B)
+for (j in 1:ncol(pred)) {
+  ind <- which(!is.na(pred[ ,j]))
+  oob_err[j] <- 1 - mean(pred[ind, j] == df$survived[ind])
+}
+
+oob_error <- mean(oob_err, na.rm = TRUE)
+oob_error  # This is the overall OOB error rate
+```
+
+```{r}
+plot(1:B, oob_err, col = "green")
+abline(h = oob_error, col = "blue", lwd = 2)
+```
+
+# Conclusion
+
+Bagging is a powerful ensemble method that significantly improves the performance of decision trees by addressing their high variance. It builds multiple models from different bootstrap samples of the training data and then combines their predictions by averaging (for regression) or voting (for classification). Bagging is a robust method with minimal setup requirements and does not require the same level of hyperparameter tuning as some other machine learning models. The primary parameter in bagging is the number of bootstrap samples (or trees in the forest, B), which often does not need fine-tuning beyond ensuring it is sufficiently large. Bagging inherently includes a form of cross-validation through the use of bootstrap samples, and the out-of-bag (OOB) error provides a handy estimate of prediction error (generalization error) without the need for a separate validation set or cross-validation.
+
+In this notebook, we implemented bagging from scratch and compared its performance with a single decision tree on the Titanic dataset. We also used the OOB samples to estimate the AUC and error rate, which is the proportion of misclassified observations. We observed that bagging significantly improved the performance of a single decision tree and that the OOB error rate was a useful estimate of prediction error.
+
+Next, we will implement Random Forest, which is an extension of bagging that further improves the performance of decision trees by addressing their high variance and high correlation among trees.

@@ -1,0 +1,479 @@
+---
+title: "<span style='color: red; font-size: 50px; font-weight: bold;'>Classification with Deep Learning</span>"
+subtitle: "Binary and Multi-Class Classification with Neural Networks"
+author: "Dr. Aydede"
+date: today
+format: 
+  html:
+    embed-resources: true
+    code-background: true
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+library(reticulate)
+use_virtualenv("/Users/yigitaydede/.virtualenvs/r-tensorflow", required = TRUE)
+Sys.unsetenv("TF_USE_LEGACY_KERAS")
+```
+
+Applying deep learning to classification problems introduces some differences in model architecture, training process, and evaluation compared to regression problems. Here's an overview of these differences and some key considerations:
+
+# Model Outcome and Activation Function
+
+Regression models typically have a single output unit without an activation function (or with a linear activation function), predicting a continuous quantity. For binary classification, there's usually a single output unit with a sigmoid activation function. The sigmoid function maps the output to a probability score between 0 and 1, indicating the likelihood of the input belonging to the positive class.
+
+For multi-class classification, the output layer has one unit per class and uses the softmax activation function. The softmax function converts the model outputs to probabilities that sum to 1, with each value representing the probability that the input belongs to one of the classes.
+
+## Loss Function  
+Regression models commonly use mean squared error (MSE) or mean absolute error (MAE) as the loss function. For binary classification, the binary cross-entropy loss function is standard.
+For multi-class classification, categorical cross-entropy (or softmax cross-entropy) loss is typically used. This loss function compares the predicted class probabilities with the true class labels and penalizes the model based on the difference between them.
+
+More detailed explanation of the loss functions is provided in Chapter 5.2.2. in the book. 
+
+
+Cross-entropy loss is a measure of the difference between two probability distributions: the predicted distribution (output of the model) and the true distribution (one-hot encoded labels). The goal is to minimize this difference during training.  The cross-entropy loss is defined as:
+
+$$
+\text{Cross-Entropy Loss} = -\sum_{i} y_i \log(p_i)
+$$
+
+where $y_i$ is the true class label (0 or 1 for binary classification, one-hot encoded for multi-class classification), and $p_i$ is the predicted probability for class $i$.  For a binary classification, we have two possible outcomes: the true label $y$ is either 0 or 1 , and the predicted probability (from the neural network) is $p$. The binary cross-entropy loss for a single observation is:
+
+$$
+L(y, p)=-[y \log (p)+(1-y) \log (1-p)]
+$$
+  
+
+**Numerical Example:** Let's compute the loss for several scenarios to see how cross-entropy penalizes predictions:
+
+| True Label ($y$) | Predicted ($p$) | Loss $L(y,p)$ | Interpretation |
+|:-:|:-:|:-:|:--|
+| 1 | 0.9 | $-\log(0.9) = 0.105$ | Confident & correct → low loss |
+| 1 | 0.5 | $-\log(0.5) = 0.693$ | Uncertain → moderate loss |
+| 1 | 0.1 | $-\log(0.1) = 2.303$ | Confident & wrong → high loss |
+| 0 | 0.1 | $-\log(0.9) = 0.105$ | Confident & correct → low loss |
+| 0 | 0.9 | $-\log(0.1) = 2.303$ | Confident & wrong → high loss |
+
+Notice: when the model is confident and correct ($p=0.9$ for $y=1$), the loss is only 0.105. But when it's confident and wrong ($p=0.1$ for $y=1$), the loss jumps to 2.303 — a 22× penalty. This steep penalty for confident wrong predictions is what drives the model to produce well-calibrated probabilities.
+
+- If the true label $y=1$, the loss becomes $L(1, p)=-\log (p)$. As $p$ (the predicted probability of the positive class) decreases, $-\log (p)$ increases, meaning the loss increases when the model's prediction is further from the actual class. 
+- If the true label $y=0$, the loss becomes $L(0, p)=-\log (1-p)$. As $p$ increases, $-\log (1-$ $p$ ) increases, meaning the loss increases when the model's prediction is incorrectly confident in the positive class.
+
+This loss function effectively penalizes predictions that are confident and wrong, encouraging the model to produce probabilities close to the actual labels.  And the total loss is
+
+$$
+J=\sum_{i=1}^n y_i \log p\left(x_i\right)+\left(1-y_i\right) \log \left(1-p\left(x_i\right)\right),
+$$
+where for each observation,
+  
+$$
+p\left(\mathbf{x}_{\mathbf{i}}\right)=\frac{e^{\beta_0+\beta x_i}}{1+e^{\beta_0+\beta x_i}}
+$$
+If the activation function is the sigmoid function.
+
+## Probabilistic Model and Thresholding
+Neural networks can be considered probabilistic in the context of classification. The output layer (using sigmoid or softmax) provides probabilities indicating the likelihood of each class. Although the raw output of the network provides these probabilities, making a final class decision often requires thresholding
+
+As before, we cannot use a common threshold, like 0.5, for the sigmoid output. We need to rely on AUC. In multi-class classification, the class with the highest probability (from the softmax output) is typically selected as the model's prediction.
+
+Unlike regression, where you might use MSE or MAE, classification models are often evaluated using accuracy, precision, recall, F1 score.  We use, however, a complex metrics like ROC-AUC or confusion matrices, depending on the specific requirements of the problem.
+
+# Classification with `neuralnet` Package
+
+## Binary Classification. 
+The goal is to predict whether a client will subscribe to a term deposit (variable $y$) based on various features such as age, job, marital status, education, and economic indicators.
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+library(dplyr)
+library(readr)
+library(skimr)
+library(ROCR)
+
+df <- read_delim("bank.csv", delim = ";",
+                   escape_double = FALSE, trim_ws = TRUE)
+
+# Scaling and Dummy coding
+df[,sapply(df, is.numeric)] <- scale((df[, sapply(df, is.numeric)]))
+ddf <- model.matrix(~.-1, data = df, contrasts.arg =
+                       lapply(df[ ,sapply(df, is.factor)],
+                              contrasts, contrasts = FALSE))
+
+# Colnames have to be cleaned
+ddf <- as.data.frame(ddf)
+clean_names <- make.names(names(ddf), unique = TRUE)
+names(ddf) <- clean_names
+
+# formula to pass on ANN and lm()  
+y.ind <- which(colnames(ddf) == "yyes")
+frm <- as.formula(paste("yyes~", paste(colnames(ddf[-y.ind]), collapse = '+')))
+```
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+library(neuralnet)
+
+set.seed(1)
+trainid <- sample(nrow(ddf), nrow(ddf), replace = TRUE)
+train <- ddf[trainid, ]
+test <- ddf[-trainid, ]
+
+fit.ln <- glm(frm, data = train, family = binomial(link = "logit"))  
+fit.nn <- neuralnet(frm,
+                    data = train,
+                    hidden = c(4),
+                    threshold = 0.05,
+                    linear.output = FALSE,
+                    err.fct = "ce")
+#Predictions
+phat.ln <- predict(fit.ln, test, type = "response")
+phat.nn <- predict(fit.nn, test, type = "response")
+
+#AUC for Logisitic Regression
+pred_rocr1 <- ROCR::prediction(phat.ln, test$yyes)
+auc_ROCR1 <- ROCR::performance(pred_rocr1, measure = "auc")
+auc_ROCR1@y.values[[1]]
+
+#AUC for Neural Network
+pred_rocr2 <- ROCR::prediction(phat.nn, test$yyes)
+auc_ROCR2 <- ROCR::performance(pred_rocr2, measure = "auc")
+auc_ROCR2@y.values[[1]]
+```
+
+## Multi-Class Classification
+
+This dataset is public available for research. The details are described in (P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236.)
+
+```{r, warning=FALSE, message=FALSE}
+dfr <- read.csv("wineQualityReds.csv", header = TRUE)
+dfr <- dfr[, -1] # removing the index
+table(dfr$quality)
+```
+
+```{r}
+# Let's remove the outlier qualities:
+indo <- which(dfr$quality == "3" | dfr$quality == "8")
+dfr <- dfr[-indo, ]
+dfr$quality <- as.factor(dfr$quality)
+table(dfr$quality)
+```
+
+```{r}
+# Scaling and Dummy coding
+dfr[, sapply(dfr, is.numeric)] <-
+  scale((dfr[, sapply(dfr, is.numeric)]))
+
+ddf <- model.matrix( ~ quality - 1, data = dfr)
+y.ind <- which(colnames(dfr) == "quality")
+dfr <- dfr[, -y.ind] # removing 'quality`
+df <- cbind(ddf, dfr)
+
+frm <- as.formula(paste(
+  paste(colnames(ddf), collapse = '+'),
+  "~",
+  paste(colnames(dfr), collapse = '+')
+))
+
+frm
+```
+
+
+```{r}
+library(neuralnet)
+
+ind <- sample(nrow(df), nrow(df) * 0.7)
+train <- df[ind, ]
+test <- df[-ind, ]
+
+fit.nn <-
+  neuralnet(
+    frm,
+    data = train,
+    hidden = c(3, 2),
+    threshold = 0.05,
+    linear.output = FALSE,
+    err.fct = "ce"
+  )
+
+plot(fit.nn, rep = "best")
+```
+
+```{r}
+phat <- predict(fit.nn, test)
+head(phat)
+```
+
+
+```{r}
+# Assigning label by selecting the highest phat
+label.hat <- t(apply(phat, 1, function(x) as.numeric(x == max(x))))
+head(label.hat)
+```
+
+  
+```{r}
+# Confusion Table
+pred <- apply(phat, 1, which.max)
+fck <- colnames(test)[1:4]
+predicted <- fck[pred]
+
+act <- apply(test[ ,1:4], 1, which.max)
+actual <- fck[act]
+
+table(predicted, actual)
+```
+
+Now AUC
+
+```{r, warning=FALSE, message=FALSE}
+library(pROC)
+
+test_labels <- test[ ,1:4]  # Extracting the first 4 columns as the true labels
+
+# Calculate AUC for each class and store it
+aucs <- sapply(1:ncol(test_labels), function(i) {
+  roc_auc <- roc(test_labels[ ,i], phat[ ,i])$auc
+  return(roc_auc)
+})
+
+# Calculate the average AUC across all classes
+unlist(aucs)
+mean_auc <- mean(aucs)
+
+print(mean_auc)
+```
+
+# `keras` Package
+
+First the preprocessing
+
+```{r}
+library(keras3)
+library(tensorflow)
+library(caret) # for dummyVars
+library(dplyr) # for data manipulation
+
+# Clearing the workspace
+rm(list = ls())
+
+# Clearing the Keras session
+clear_session()
+
+# Load the data 
+dfr <- read.csv("wineQualityReds.csv", header = TRUE)
+dfr <- dfr[, -1] # removing the index column
+indo <- which(dfr$quality == 3 | dfr$quality == 8) # Ensure quality is treated as numeric, not string
+dfr <- dfr[-indo, ]
+
+# Convert quality to a factor for one-hot encoding
+dfr$quality <- as.factor(dfr$quality)
+
+# One-hot encode the quality variable
+quality_one_hot <- model.matrix(~ quality - 1, data = dfr)
+
+# Prepare the data excluding the original quality column
+df_transformed <- dfr[, -which(names(dfr) == "quality")]
+
+# Scale the numeric features (important for neural networks!)
+df_transformed <- as.data.frame(scale(df_transformed))
+
+# Splitting the dataset into training and test sets
+set.seed(123) # For reproducibility
+indexes <- sample(1:nrow(dfr), size = 0.8 * nrow(dfr), replace = FALSE) # Randomly sample 80% of the data
+
+train_x <- df_transformed[indexes, ]
+test_x <- df_transformed[-indexes, ]
+train_y <- quality_one_hot[indexes, ]
+test_y <- quality_one_hot[-indexes, ]
+
+# Define the input layer using the number of predictors
+inputs <- layer_input(shape = ncol(train_x))
+
+# There are 4 classes after your preprocessing
+outputs<- inputs %>%
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 4, activation = 'softmax') # Update this to match the number of classes
+
+# Create the model by specifying inputs and outputs
+model <- keras_model(inputs = inputs, outputs = outputs)
+
+# Compile the model for multi-class classification
+model$compile(
+  loss = 'categorical_crossentropy', # Correct loss function for multi-class
+  optimizer = 'adam',
+  metrics = list(metric_binary_accuracy(), metric_auc(name = "auc")) # Accuracy is a common metric for classification
+)
+
+# Fit the model
+history <- model$fit(
+  x = as.matrix(train_x), 
+  y = train_y,
+  epochs = as.integer(100), 
+  batch_size = as.integer(128), 
+  validation_split = 0.2, 
+  verbose = 0
+)
+
+# Predictions as probabilities
+predictions <- model$predict(as.matrix(test_x))
+head(predictions)
+
+# Evaluate the model on the test set
+test_x_matrix <- as.matrix(test_x)
+score <- model$evaluate(test_x_matrix, test_y, verbose = 1)
+
+cat("Test loss (categorical crossentropy):", score[[1]], "\n")
+cat("Test binary accuracy:", score[[2]], "\n")
+cat("Test AUC:", score[[3]], "\n")
+```
+
+Now AUC
+
+```{r, warning=FALSE, message=FALSE}
+library(pROC)
+
+# Initialize an empty vector to store AUC for each class
+aucs <- c()
+
+# Calculate AUC for each class
+for (i in 1:ncol(test_y)) {
+  roc_res <- roc(response = test_y[, i], predictor = predictions[, i])
+  aucs[i] <- auc(roc_res)
+}
+
+# Calculate mean AUC across all classes
+mean_auc <- mean(aucs)
+
+print(aucs)
+print(mean_auc)
+
+```
+
+::: {.callout-important}
+## Why Are the Two AUC Values Different?
+You may notice that the **Keras AUC** (from `model$evaluate()`) is higher than the **pROC AUC** (from `mean_auc`). These are computed differently:
+
+- **Keras `metric_auc()`** uses a batch-wise **approximation** with binned thresholds (default 200 bins), treating each softmax output as an independent binary classification. This approximation can overestimate AUC, especially with smaller test sets.
+- **pROC `roc()`** computes the **exact** AUC using the full ROC curve (trapezoidal rule) for each class, then takes a simple macro-average.
+
+The pROC calculation is the more standard and reliable metric for final evaluation. Keras AUC is primarily useful for **monitoring trends during training** (is AUC going up or down across epochs?), not as a definitive performance measure.
+:::
+
+::: {.callout-note}
+## AUC as a Training Metric
+In earlier versions of Keras, AUC couldn't be tracked during training because it requires the entire dataset's predictions to compute accurately (unlike accuracy, which works batch-wise). Since TensorFlow 2.2.0+, you can include AUC as a metric during compilation using `tf$keras$metrics$AUC()`.
+:::
+
+## Keras Classification with Python
+
+Let's replicate the same multi-class classification in Python. First, we save the wine data from R:
+
+```{r}
+# Save the wine quality data for Python
+dfr_save <- read.csv("wineQualityReds.csv", header = TRUE)
+write.csv(dfr_save, "wineQualityReds_clean.csv", row.names = FALSE)
+```
+
+```{python}
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.models import Model
+import numpy as np
+import pandas as pd
+
+# Clear session
+K.clear_session()
+
+# Load and preprocess
+df = pd.read_csv("wineQualityReds.csv")
+df = df.iloc[:, 1:]  # Remove index column
+df = df[~df['quality'].isin([3, 8])]  # Remove outlier quality levels
+
+# Separate features and target
+X = df.drop(columns=['quality']).values
+y = df['quality'].values
+
+# Scale features (manual z-score standardization)
+X = (X - X.mean(axis=0)) / X.std(axis=0)
+
+# One-hot encode the target using pandas
+y_onehot = pd.get_dummies(y).values
+n_classes = y_onehot.shape[1]
+
+# Train/test split
+np.random.seed(123)
+indices = np.random.permutation(len(X))
+split = int(0.8 * len(X))
+train_x, test_x = X[indices[:split]], X[indices[split:]]
+train_y, test_y = y_onehot[indices[:split]], y_onehot[indices[split:]]
+
+# Build model (same architecture as R version)
+inputs = Input(shape=(train_x.shape[1],))
+x = Dense(32, activation='relu')(inputs)
+x = Dense(32, activation='relu')(x)
+outputs = Dense(n_classes, activation='softmax')(x)
+
+model = Model(inputs=inputs, outputs=outputs)
+
+# Compile with categorical crossentropy (multi-class)
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# Train
+history = model.fit(
+    train_x, train_y,
+    epochs=100,
+    batch_size=128,
+    validation_split=0.2,
+    verbose=0
+)
+
+# Evaluate
+score = model.evaluate(test_x, test_y, verbose=0)
+print(f'Test loss: {score[0]:.4f}')
+print(f'Test accuracy: {score[1]:.4f}')
+
+# Predictions
+predictions = model.predict(test_x, verbose=0)
+print(f'Prediction shape: {predictions.shape} (samples × {n_classes} classes)')
+print(f'First prediction (probabilities): {predictions[0].round(4)}')
+
+# Calculate AUC for each class using TensorFlow's built-in AUC metric
+import tensorflow as tf
+
+auc_per_class = []
+for i in range(test_y.shape[1]):
+    auc_metric = tf.keras.metrics.AUC()
+    auc_metric.update_state(test_y[:, i], predictions[:, i])
+    auc_per_class.append(auc_metric.result().numpy())
+
+print(f'AUC per class: {[round(float(a), 4) for a in auc_per_class]}')
+print(f'Mean AUC: {np.mean(auc_per_class):.4f}')
+```
+
+::: {.callout-note}
+## Why Do R and Python AUC Values Differ?
+The R and Python sections produce different AUC values despite using the same dataset and architecture. This is expected because: (1) R and Python have **different random number generators**, so `set.seed(123)` and `np.random.seed(123)` produce different train/test splits; (2) R's `scale()` uses sample SD ($n-1$ denominator) while NumPy's `std()` uses population SD ($n$ denominator); and (3) each model starts with different random weight initializations. The two sections demonstrate the **same approach** in two languages — they are not expected to produce identical numbers.
+:::
+
+The key differences from the regression model in `DL.qmd`:
+
+- **Output layer**: `Dense(4, activation='softmax')` instead of `Dense(1)` — one neuron per class with softmax
+- **Loss function**: `categorical_crossentropy` instead of `mean_squared_error`
+- **Evaluation metric**: Accuracy and AUC instead of MAE
+

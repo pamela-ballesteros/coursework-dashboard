@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coursework Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafaf7;
+    --bg-card: #ffffff;
+    --bg-subtle: #f4f3ee;
+    --border: #e8e6df;
+    --border-strong: #d4d1c7;
+    --ink: #1a1a1a;
+    --ink-soft: #555250;
+    --ink-muted: #8a8680;
+    --accent: #8b2020;
+    --accent-soft: #faf0ef;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 20px rgba(0,0,0,0.06);
+    --serif: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 15px;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .container {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 2.5rem;
+  }
+
+  /* === HEADER === */
+  header {
+    padding: 4rem 0 3rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 1.25rem;
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.25rem;
+    color: var(--ink);
+  }
+
+  h1 em {
+    font-style: italic;
+    font-weight: 300;
+  }
+
+  .subtitle {
+    font-size: 1.075rem;
+    color: var(--ink-soft);
+    max-width: 38rem;
+    line-height: 1.55;
+  }
+
+  .archive-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 2.25rem;
+    max-width: 760px;
+  }
+
+  .stat-tile {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 1rem;
+    border-radius: 2px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .stat-value {
+    font-family: var(--serif);
+    font-size: 1.65rem;
+    line-height: 1;
+    color: var(--ink);
+    margin-bottom: 0.35rem;
+  }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  /* === SEARCH === */
+  .search-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: linear-gradient(var(--bg) 80%, transparent);
+    padding: 1.5rem 0 1rem;
+    margin-top: 2.5rem;
+  }
+
+  .search-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 0.85rem 1.15rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .search-box:focus-within {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px rgba(26,26,26,0.06);
+  }
+
+  .search-box svg {
+    width: 16px;
+    height: 16px;
+    color: var(--ink-muted);
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  #search {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    color: var(--ink);
+    background: transparent;
+  }
+
+  #search::placeholder { color: var(--ink-muted); }
+
+  .search-hint {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--ink-muted);
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-subtle);
+  }
+
+  /* === FILTERS === */
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .search-insights {
+    display: none;
+    margin-top: 0.85rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+
+  .search-insights.active {
+    display: block;
+  }
+
+  .search-insights-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .clear-search {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--ink-soft);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+  }
+
+  .clear-search:hover {
+    color: var(--accent);
+  }
+
+  .search-result-list {
+    display: grid;
+  }
+
+  .search-result {
+    display: grid;
+    grid-template-columns: 6rem 1fr auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+  }
+
+  .search-result:last-child {
+    border-bottom: none;
+  }
+
+  .search-result:hover {
+    background: var(--bg-subtle);
+  }
+
+  .result-type {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .result-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 0.1rem;
+  }
+
+  .result-context {
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+  }
+
+  .result-course {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .filter-chip {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .filter-chip:hover {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  .filter-chip.active {
+    background: var(--ink);
+    color: var(--bg);
+    border-color: var(--ink);
+  }
+
+  /* === RESULTS COUNTER === */
+  .results-meta {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 2rem 0 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* === SECTIONS === */
+  section {
+    margin: 3rem 0;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 1.5rem;
+    color: var(--ink);
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+
+  h2 .count {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink-muted);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+  }
+
+  /* === COURSE CARDS === */
+  .course-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1rem;
+  }
+
+  .course-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 1.75rem;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+
+  .course-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .course-arrow {
+    font-family: var(--mono);
+    font-size: 1rem;
+    color: var(--ink-muted);
+    transform: translateX(-2px);
+    transition: transform 0.15s, color 0.15s;
+  }
+
+  .course-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--accent);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 0.25s ease;
+  }
+
+  .course-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .course-card:hover::before {
+    transform: scaleY(1);
+    transform-origin: top;
+  }
+
+  .course-card:hover .course-arrow {
+    color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  .course-number {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--ink-muted);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.5rem;
+  }
+
+  .course-card h3 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    margin-bottom: 0.4rem;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+
+  .course-card .course-term {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-muted);
+    letter-spacing: 0.03em;
+    margin-bottom: 0.85rem;
+  }
+
+  .course-card .course-desc {
+    font-size: 0.885rem;
+    color: var(--ink-soft);
+    line-height: 1.55;
+    margin-bottom: 1rem;
+  }
+
+  .course-card .course-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .course-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin-top: 1.2rem;
+  }
+
+  .metric {
+    border: 1px solid var(--border);
+    background: var(--bg-subtle);
+    padding: 0.55rem 0.65rem;
+    border-radius: 2px;
+  }
+
+  .metric strong {
+    display: block;
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 1.05rem;
+    line-height: 1;
+    color: var(--ink);
+  }
+
+  .metric span {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    padding: 0.2rem 0.5rem;
+    background: var(--bg-subtle);
+    color: var(--ink-soft);
+    border-radius: 2px;
+    letter-spacing: 0.03em;
+  }
+
+  .tag.highlight {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .study-guide {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 1.1rem 1.25rem;
+    margin: 1.5rem 0 2rem;
+  }
+
+  .study-guide .eyebrow {
+    margin-bottom: 0.45rem;
+  }
+
+  .study-guide h3 {
+    font-family: var(--serif);
+    font-size: 1.25rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink);
+    border-bottom: none;
+    padding: 0;
+    margin-bottom: 0.45rem;
+  }
+
+  .study-guide p {
+    color: var(--ink-soft);
+    max-width: 46rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .study-guide-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .placeholder-card {
+    background: transparent;
+    border: 1px dashed var(--border);
+    padding: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-muted);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    min-height: 180px;
+  }
+
+  /* === LAB LISTINGS === */
+  .lab-list {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .lab-item {
+    display: grid;
+    grid-template-columns: 3rem 1fr auto;
+    align-items: center;
+    padding: 0.9rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.15s;
+    gap: 1rem;
+  }
+
+  .lab-item:hover {
+    border-color: var(--ink);
+    background: var(--bg-card);
+    transform: translateX(2px);
+  }
+
+  .lab-num {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+    font-weight: 500;
+  }
+
+  .lab-content h4 {
+    font-family: var(--sans);
+    font-size: 0.925rem;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 0.15rem;
+  }
+
+  .lab-content .lab-theme {
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+  }
+
+  .lab-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .lab-link {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    text-decoration: none;
+    color: var(--ink-soft);
+    border-radius: 2px;
+    transition: all 0.15s;
+    text-transform: lowercase;
+  }
+
+  .lab-link:hover {
+    border-color: var(--ink);
+    color: var(--ink);
+    background: var(--bg-subtle);
+  }
+
+  /* === COURSE DETAIL VIEW === */
+  .detail-view {
+    display: none;
+    animation: fadeIn 0.25s ease;
+  }
+
+  .detail-view.active {
+    display: block;
+  }
+
+  .home-view.hidden {
+    display: none;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    text-decoration: none;
+    padding: 0.5rem 0;
+    margin-bottom: 2rem;
+    cursor: pointer;
+    background: none;
+    border: none;
+    letter-spacing: 0.03em;
+    transition: color 0.15s;
+  }
+
+  .back-btn:hover { color: var(--ink); }
+
+  .detail-header h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.015em;
+    display: block;
+  }
+
+  .detail-meta {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink-muted);
+    letter-spacing: 0.04em;
+    margin-bottom: 1.5rem;
+  }
+
+  .detail-summary {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    line-height: 1.65;
+    max-width: 42rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .detail-section {
+    margin: 2.5rem 0;
+  }
+
+  .detail-section h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .concept-list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.3rem;
+  }
+
+  .concept-list li {
+    padding: 0.65rem 0.85rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-size: 0.875rem;
+    color: var(--ink-soft);
+  }
+
+  .concept-list li strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .readme-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    background: var(--ink);
+    color: var(--bg);
+    text-decoration: none;
+    border-radius: 2px;
+    transition: background 0.15s;
+    letter-spacing: 0.03em;
+  }
+
+  .readme-link:hover { background: var(--accent); }
+
+  .hidden { display: none !important; }
+
+  .empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--ink-muted);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+  }
+
+  /* === FOOTER === */
+  footer {
+    margin-top: 6rem;
+    padding: 2.5rem 0 3rem;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-muted);
+    letter-spacing: 0.04em;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  /* === RESPONSIVE === */
+  @media (max-width: 640px) {
+    .container { padding: 0 1.25rem; }
+    header { padding: 2.5rem 0 2rem; }
+    .lab-item {
+      grid-template-columns: 2rem 1fr;
+    }
+    .lab-actions {
+      grid-column: 1 / -1;
+      margin-top: 0.5rem;
+    }
+    .filters { margin-top: 0.75rem; }
+    .archive-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .search-result { grid-template-columns: 1fr; gap: 0.35rem; }
+    .result-course { white-space: normal; }
+  }
+
+  /* === HIGHLIGHT === */
+  mark {
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 0 2px;
+    border-radius: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <header>
+    <div class="eyebrow">Personal Knowledge Archive of Pamela B.</div>
+    <h1>Master of Business Analytics
+    </h1>Coursework <em>Dashboard</em></h1>
+    <p class="subtitle">A curated reference of my graduate coursework — syllabi, notes, assignments, and key concepts, organized for review and reuse.</p>
+    <div class="archive-stats" id="archiveStats" aria-label="Archive summary">
+      <div class="stat-tile">
+        <div class="stat-value" id="statCourses">0</div>
+        <div class="stat-label">Courses</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="statAssignments">0</div>
+        <div class="stat-label">Assignments</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="statMaterials">0</div>
+        <div class="stat-label">Materials</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="statConcepts">0</div>
+        <div class="stat-label">Concepts</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- HOME VIEW -->
+  <div class="home-view" id="homeView">
+
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="search" placeholder="Search courses, labs, concepts — try 'random forest' or 'gradient descent'" autocomplete="off">
+        <span class="search-hint">/ to focus</span>
+      </div>
+      <div class="search-insights" id="searchInsights" aria-live="polite"></div>
+
+      <div class="filters" id="filters">
+        <button class="filter-chip active" data-filter="all">All</button>
+        <button class="filter-chip" data-filter="machine-learning">Machine Learning</button>
+        <button class="filter-chip" data-filter="finance">Finance</button>
+        <button class="filter-chip" data-filter="optimization">Optimization</button>
+        <button class="filter-chip" data-filter="agentic-ai">Agentic AI</button>
+        <button class="filter-chip" data-filter="data-management">Data Management</button>
+        <button class="filter-chip" data-filter="analytics">Analytics</button>
+      </div>
+    </div>
+
+    <section>
+      <div class="results-meta">
+        <span id="resultsCount">5 courses</span>
+        <span id="activeFilter"></span>
+      </div>
+
+      <div class="course-grid" id="courseGrid">
+        <!-- courses populated by JS -->
+      </div>
+    </section>
+
+    <div class="empty-state hidden" id="emptyState">
+      No courses or labs match your search.
+    </div>
+
+  </div>
+
+  <!-- COURSE DETAIL VIEW -->
+  <div class="detail-view" id="detailView">
+    <button class="back-btn" onclick="showHome()">← Back to dashboard</button>
+    <div id="detailContent"></div>
+  </div>
+
+  <footer>
+    <span>Last updated: April 2026</span>
+    <span>Press <kbd style="font-family:var(--mono);">/</kbd> to search · <kbd style="font-family:var(--mono);">esc</kbd> to clear</span>
+  </footer>
+
+</div>
+
+<script>
+// ============================================================
+// DATA — Edit this when adding new courses
+// ============================================================
+const courses = [
+  {
+    id: "01-mban-5560-machine-learning-ai",
+    number: "01",
+    code: "MBAN 5560",
+    name: "Machine Learning & Artificial Intelligence",
+    term: "Winter 2026",
+    instructor: "Dr. Yigit Aydede",
+    level: "Graduate (MBAN)",
+    focus: "ML foundations, tree ensembles, deep learning, sequence models (R)",
+    summary: "Foundations-first tour of modern ML: bias-variance tradeoff, cross-validation, tree-based ensembles (CART, bagging, random forests, boosting, XGBoost), interpretability (SHAP), clustering, imbalanced data (SMOTE), gradient descent, neural networks, deep learning with Keras, and recurrent models (RNN/LSTM). All labs in R using Quarto.",
+    tags: ["R", "Quarto", "ML", "Deep Learning", "Time Series"],
+    categories: ["machine-learning", "analytics"],
+    keyConcepts: [
+      { term: "Bias-variance tradeoff", desc: "U-shaped prediction error" },
+      { term: "Cross-validation & bootstrapping", desc: "hyperparameter tuning without touching test set" },
+      { term: "Out-of-bag (OOB)", desc: "free validation from bootstrap sampling" },
+      { term: "CART", desc: "Gini, recursive partitioning" },
+      { term: "Bagging", desc: "variance reduction via averaging" },
+      { term: "Random Forests", desc: "bagging + feature subsampling" },
+      { term: "Gradient Boosting", desc: "sequential trees on pseudo-residuals" },
+      { term: "XGBoost", desc: "regularized GBM" },
+      { term: "SHAP values", desc: "game-theoretic attributions" },
+      { term: "k-means clustering", desc: "elbow & silhouette" },
+      { term: "SMOTE", desc: "synthetic oversampling for imbalance" },
+      { term: "Gradient descent (SGD, mini-batch)", desc: "optimization at scale" },
+      { term: "Neural networks", desc: "polynomial regression with learned bases" },
+      { term: "Activation functions", desc: "ReLU, sigmoid, tanh" },
+      { term: "Deep learning with Keras", desc: "multi-layer nets, regularization" },
+      { term: "RNN & LSTM", desc: "sequence modeling" },
+      { term: "Time-series embedding", desc: "embed() for direct forecasting" }
+    ],
+    tools: ["caret", "rpart", "randomForest", "gbm", "xgboost", "smotefamily", "keras", "tensorflow", "fpp3"],
+    labs: [
+      { n: "00", title: "Parametric vs. Nonparametric", theme: "Framing", cat: "fundamentals", qmd: null, html: "courses/01-mban-5560-machine-learning-ai/labs/00-parametric-vs-nonparametric.html.zip" },
+      { n: "01", title: "kNN — Fundamentals", theme: "Distance metrics, basic classifier", cat: "fundamentals", qmd: "courses/01-mban-5560-machine-learning-ai/labs/01-knn-fundamentals.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/01-knn-fundamentals.html.zip" },
+      { n: "02", title: "kNN — AUC & ROC", theme: "Probabilistic kNN, threshold selection", cat: "fundamentals", qmd: "courses/01-mban-5560-machine-learning-ai/labs/02-knn-auc-roc.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/02-knn-auc-roc.html.zip" },
+      { n: "03", title: "Self-Learning Methods", theme: "k-fold CV, bootstrapping, OOB", cat: "fundamentals", qmd: "courses/01-mban-5560-machine-learning-ai/labs/03-self-learning-methods.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/03-self-learning-methods.html.zip" },
+      { n: "04", title: "Parallel Computing", theme: "Speeding up resampling loops", cat: "fundamentals", qmd: "courses/01-mban-5560-machine-learning-ai/labs/04-parallel-computing.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/04-parallel-computing.html.zip" },
+      { n: "05", title: "CART — Classification Tree", theme: "Gini, recursive partitioning, rpart", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/05-cart-classification-tree.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/05-cart-classification-tree.html.zip" },
+      { n: "06", title: "Bagging", theme: "Bootstrap aggregation on Titanic", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/06-bagging.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/06-bagging.html.zip" },
+      { n: "07", title: "Random Forest", theme: "OOB tuning, variable importance", cat: "trees", qmd: null, html: "courses/01-mban-5560-machine-learning-ai/labs/07-random-forest.html.zip" },
+      { n: "08", title: "SHAP Values", theme: "Shapley-based interpretability", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/08-shap-values.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/08-shap-values.html.zip" },
+      { n: "09", title: "Boosting / GBM", theme: "AdaBoost, gradient boosting theory", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/09-boosting-gbm.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/09-boosting-gbm.html.zip" },
+      { n: "10", title: "XGBoost", theme: "Regularized GBM", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/10-xgboost.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/10-xgboost.html.zip" },
+      { n: "11", title: "GBM vs. XGBoost (Applied)", theme: "Head-to-head on Ames Housing", cat: "trees", qmd: "courses/01-mban-5560-machine-learning-ai/labs/11-gbm-vs-xgboost-applied.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/11-gbm-vs-xgboost-applied.html.zip" },
+      { n: "12", title: "Clustering (Unsupervised)", theme: "k-means, elbow, silhouette", cat: "unsupervised", qmd: "courses/01-mban-5560-machine-learning-ai/labs/12-clustering-unsupervised.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/12-clustering-unsupervised.html.zip" },
+      { n: "13", title: "Imbalanced Data", theme: "SMOTE on credit card fraud", cat: "fundamentals", qmd: "courses/01-mban-5560-machine-learning-ai/labs/13-imbalanced-data-smote.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/13-imbalanced-data-smote.html.zip" },
+      { n: "14", title: "Gradient Descent — Intro", theme: "Batch GD, recovering OLS", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/14-gradient-descent-intro.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/14-gradient-descent-intro.html.zip" },
+      { n: "15", title: "Gradient Descent — SGD & Mini-batch", theme: "Stochastic variants for ML", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/15-gradient-descent-sgd-minibatch.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/15-gradient-descent-sgd-minibatch.html.zip" },
+      { n: "16", title: "Neural Networks — Intro", theme: "From polynomials to adaptive bases", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/16-neural-networks-intro.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/16-neural-networks-intro.html.zip" },
+      { n: "17", title: "Activation Functions", theme: "ReLU, sigmoid, tanh", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/17-activation-functions.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/17-activation-functions.html.zip" },
+      { n: "18", title: "Deep Learning with Keras", theme: "Multi-layer networks, regression", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/18-deep-learning-keras.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/18-deep-learning-keras.html.zip" },
+      { n: "19", title: "Deep Learning — Classification", theme: "Binary & multi-class with Keras", cat: "deep-learning", qmd: "courses/01-mban-5560-machine-learning-ai/labs/19-deep-learning-classification.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/19-deep-learning-classification.html.zip" },
+      { n: "20", title: "Time-Series Embedding + RF", theme: "embed() + Random Forest forecasting", cat: "time-series", qmd: "courses/01-mban-5560-machine-learning-ai/labs/20-timeseries-embedding-rf.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/20-timeseries-embedding-rf.html.zip" },
+      { n: "21", title: "RNN & LSTM", theme: "Sequence models for time series", cat: "time-series", qmd: "courses/01-mban-5560-machine-learning-ai/labs/21-rnn-lstm.qmd", html: "courses/01-mban-5560-machine-learning-ai/labs/21-rnn-lstm.html.zip" }
+    ],
+    assignments: [
+      { n: "A", title: "Assignments Folder", theme: "Dedicated folder for MBAN 5560 assignments", path: "courses/01-mban-5560-machine-learning-ai/assignments/" }
+    ],
+    readme: "courses/01-mban-5560-machine-learning-ai/README.md"
+  },
+  {
+    id: "02-mban-5570-Acctg-Finance",
+    number: "02",
+    code: "MBAN 5570",
+    name: "Accounting and Financial Analytics",
+    term: "Winter 2026",
+    instructor: "Dr. Mohammad Rahaman",
+    level: "Graduate (MBAN)",
+    focus: "Financial statement analytics, market microstructure, risk modeling, event studies, NLP, and forecasting",
+    summary: "Applied analytics for accounting and finance, covering financial statements, market microstructure, anti-money laundering, risk modeling, event studies, predictive analytics, NLP applications, time-series analytics, and investment banking career preparation.",
+    tags: ["Finance", "Accounting", "Risk", "NLP", "Forecasting"],
+    categories: ["finance", "analytics", "machine-learning"],
+    keyConcepts: [
+      { term: "Financial statement analytics", desc: "using accounting data for insight and decision support" },
+      { term: "Market microstructure", desc: "how trading venues, liquidity, and order flow shape prices" },
+      { term: "Risk modeling", desc: "random variables, distributions, simulation, and scenario analysis" },
+      { term: "Event studies", desc: "measuring market reaction around corporate events" },
+      { term: "Predictive analytics", desc: "models for finance and credit-rating applications" },
+      { term: "NLP in finance", desc: "extracting signal from financial text" },
+      { term: "Time-series analytics", desc: "financial forecasting and temporal patterns" },
+      { term: "Financial modeling", desc: "pro forma forecasts, valuation models, and decision trees" }
+    ],
+    tools: ["Excel", "@Risk", "Python", "Jupyter", "Stata", "CSV/XLSX datasets"],
+    labs: [
+      { n: "L01", title: "10 Principles of Finance", theme: "Core finance foundations", cat: "finance", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_ The 10 Principles of Finance_Y2026.pdf" },
+      { n: "L02", title: "Financial Statement Analytics", theme: "Accounting data and analysis", cat: "finance", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_ Financial Statement Analytics_Y2026.pdf" },
+      { n: "L03", title: "Financial Market Microstructure", theme: "Trading, liquidity, and market mechanics", cat: "finance", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_ Financial Market Microstructure_Y2026.pdf" },
+      { n: "L04", title: "Event Study Analytics", theme: "Corporate events and abnormal returns", cat: "analytics", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_EventStudyAnalytics_Y2026 (3).pdf" },
+      { n: "L05", title: "Modelling Risk", theme: "Risk, uncertainty, and simulation", cat: "finance", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_ModellingRisk_Y2026 (2).pdf" },
+      { n: "L06", title: "Predictive Analytics Models", theme: "Applied prediction for finance", cat: "analytics", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_PredictiveAnalyticsModels_Y2026 (1).pdf" },
+      { n: "L07", title: "NLP Application", theme: "Text analytics in finance", cat: "analytics", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/lectures/MBAN5570_NLP_Application_Y2026.pdf" },
+      { n: "A01", title: "Assignments and Reports", theme: "Equity research, ARIMA, credit rating, NLP, and trading signals", cat: "finance", qmd: null, html: "courses/02-mban-5570-Acctg-Finance/Assign1/" }
+    ],
+    assignments: [
+      { n: "A", title: "Assignment Folder", theme: "All MBAN 5570 assignment files, reports, notebooks, and datasets", path: "courses/02-mban-5570-Acctg-Finance/Assign1/" },
+      { n: "A1", title: "Assignment 1", theme: "Assignment prompt, submission, and supporting workbook", path: "courses/02-mban-5570-Acctg-Finance/Assign1/PB Assignment1.pdf" },
+      { n: "A2", title: "Assignment 2", theme: "Finance analytics assignment submission", path: "courses/02-mban-5570-Acctg-Finance/Assign1/PB Assignment2.pdf" },
+      { n: "A3", title: "Assignment 3", theme: "Bitcoin data, analytics notebook, and assignment report", path: "courses/02-mban-5570-Acctg-Finance/Assign1/MBAN5570_Assignment3_PamelaB.pdf" },
+      { n: "A4", title: "Assignment 4", theme: "Credit rating, NLP, ARIMA, and final assignment materials", path: "courses/02-mban-5570-Acctg-Finance/Assign1/PamelaB_Assignment4.pdf" },
+      { n: "A5", title: "Assignment 5", theme: "Final finance assignment submission", path: "courses/02-mban-5570-Acctg-Finance/Assign1/PB_Assignment 5.pdf" },
+      { n: "ER", title: "Equity Research Reports", theme: "Costco, Amazon, and white paper deliverables", path: "courses/02-mban-5570-Acctg-Finance/Assign1/COST_Equity_Research_White_Paper.pdf" },
+      { n: "PY", title: "Python Finance Tutorials", theme: "Colab basics, financial data, APIs, and visualization notebooks", path: "courses/02-mban-5570-Acctg-Finance/Assign1/Introduction to Python in Finance.ipynb" }
+    ],
+    readme: "courses/02-mban-5570-Acctg-Finance/"
+  },
+  {
+    id: "03-mban-5540-Prescriptive-Optimzation",
+    number: "03",
+    code: "MBAN 5540",
+    name: "Prescriptive Optimization",
+    term: "Winter 2026",
+    instructor: "Dr.Majid Taghavi",
+    level: "Graduate (MBAN)",
+    focus: "Linear programming, integer programming, network models, simulation, dynamic programming, and Markov models",
+    summary: "Optimization-focused coursework with lectures and applied notebooks for mathematical modeling, LP solutions and sensitivity analysis, duality, integer programming, network models, supply-chain design, decision analysis, Monte Carlo simulation, dynamic programming, and Markov models.",
+    tags: ["Optimization", "Gurobi", "LP", "Simulation", "Python"],
+    categories: ["optimization", "analytics"],
+    keyConcepts: [
+      { term: "Mathematical modeling", desc: "translating business problems into decision variables, objectives, and constraints" },
+      { term: "Linear programming", desc: "LP formulation, solution methods, and sensitivity analysis" },
+      { term: "Duality", desc: "shadow prices and primal-dual interpretation" },
+      { term: "Integer programming", desc: "binary and integer decisions for operational planning" },
+      { term: "Network models", desc: "transportation, supply-chain, and flow optimization" },
+      { term: "Monte Carlo simulation", desc: "modeling uncertainty through repeated sampling" },
+      { term: "Dynamic programming", desc: "multi-stage decisions and recursive structure" },
+      { term: "Markov models", desc: "state transitions and stochastic systems" }
+    ],
+    tools: ["Python", "Jupyter", "Gurobi", "Excel", "LP files"],
+    labs: [
+      { n: "W01", title: "Introduction to Mathematical Modeling", theme: "Model structure and formulation", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 01 - Introduction to Mathematical Modeling.pdf" },
+      { n: "W02", title: "LP Solutions", theme: "Linear programming fundamentals", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 02 - LP Solutions.pdf" },
+      { n: "W03", title: "LP Sensitivity Analysis", theme: "Sensitivity and managerial interpretation", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 03 - LP Sensitivity Analysis.pdf" },
+      { n: "W04", title: "Duality", theme: "Primal and dual model interpretation", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 04 - Duality (1).pdf" },
+      { n: "W05", title: "Integer Programming", theme: "Discrete decision models", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 05 - Integer Programming (1).pdf" },
+      { n: "W06", title: "Network Models", theme: "Flow and network optimization", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 06 - Network Models (2).pdf" },
+      { n: "W07", title: "Supply Chain Network Design", theme: "Operations and network design", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 07 - Supply Chain Network Design.pdf" },
+      { n: "W09", title: "Monte Carlo Simulation", theme: "Uncertainty and simulation", cat: "analytics", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/lectures/Week 09 - Monte Carlo Simulation.pdf" },
+      { n: "C04", title: "Viktor Lenac Production Planning", theme: "Case study dashboard, report, and notebook", cat: "optimization", qmd: null, html: "courses/03-mban-5540-Prescriptive-Optimzation/Case Study 4 - Viktor Lenac Project/Viktor Lenac Dashboard.html" }
+    ],
+    assignments: [
+      { n: "A", title: "Assignment Folder", theme: "All MBAN 5540 assignment notebooks, reports, LP files, and handouts", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/" },
+      { n: "A1", title: "Assignment 1", theme: "Winter 2026 assignment prompt, submission, and workbook", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/PB_Assignment 1.pdf" },
+      { n: "A2", title: "Assignment 2", theme: "Primal, dual, transportation, and knapsack models", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/PB_Assignment 2.pdf" },
+      { n: "A5", title: "Assignment 5", theme: "Optimization assignment submission", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/PB_Assignment 5.pdf" },
+      { n: "LP", title: "LP Model Files", theme: "Primal, dual, transportation, and multiple-knapsack LP files", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/Primal.lp" },
+      { n: "NB", title: "Optimization Notebooks", theme: "Gurobi, knapsack, transportation, and solved model notebooks", path: "courses/03-mban-5540-Prescriptive-Optimzation/Assignment/Q1_Multiple_Knapsack.ipynb" },
+      { n: "CS", title: "Viktor Lenac Case Study Folder", theme: "Production planning case files, dashboard, report, and presentation", path: "courses/03-mban-5540-Prescriptive-Optimzation/Case Study 4 - Viktor Lenac Project/" },
+      { n: "CS", title: "Viktor Lenac Dashboard", theme: "Interactive production planning dashboard", path: "courses/03-mban-5540-Prescriptive-Optimzation/Case Study 4 - Viktor Lenac Project/Viktor Lenac Dashboard.html" }
+    ],
+    readme: "courses/03-mban-5540-Prescriptive-Optimzation/"
+  },
+  {
+    id: "04-mban-5510-Agentic AI",
+    number: "04",
+    code: "MBAN 5510",
+    name: "Agentic AI",
+    term: "Winter 2026",
+    instructor: "Dr. Michael Zhang",
+    level: "Graduate (MBAN)",
+    focus: "AI agents, LLM foundations, LangChain, LangGraph, middleware, deep agents, and testing",
+    summary: "Course materials focused on practical agentic AI systems: LLM foundations, AI agents, LangChain, middleware, LangGraph, advanced graph workflows, deep agents, Selenium testing, and applied test-case design.",
+    tags: ["Agentic AI", "LLMs", "LangChain", "LangGraph", "Testing"],
+    categories: ["agentic-ai", "machine-learning", "analytics"],
+    keyConcepts: [
+      { term: "AI agents", desc: "systems that combine model reasoning with tools, memory, and workflows" },
+      { term: "LLM foundations", desc: "core concepts behind large language models and prompt-driven behavior" },
+      { term: "LangChain", desc: "chains, tools, middleware, and application orchestration" },
+      { term: "LangGraph", desc: "graph-based agent workflows and stateful control flow" },
+      { term: "Deep agents", desc: "more advanced agent architectures and long-running task patterns" },
+      { term: "Testing", desc: "Selenium examples and structured test cases for agentic applications" }
+    ],
+    tools: ["Python", "LangChain", "LangGraph", "Selenium", "PowerPoint"],
+    labs: [
+      { n: "LLM", title: "LLMs", theme: "Large language model foundations", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/LLMs.pdf" },
+      { n: "P01", title: "What's AI Agent", theme: "Agent foundations", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 1 What's AI Agent.pdf" },
+      { n: "P02", title: "Good-to-Know Foundations", theme: "LLM and AI foundations", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 2 Some Good-to-Know Foundations (1).pdf" },
+      { n: "P03", title: "Intro to LangChain", theme: "LangChain application building", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 3 Intro to LangChain (2).pdf" },
+      { n: "P04", title: "Middleware", theme: "Agent and application middleware", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 4 Middleware (1).pdf" },
+      { n: "P05", title: "Advanced LangChain", theme: "Advanced LangChain topics", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 5 Some Advanced Topics of LangChain2 (1).pdf" },
+      { n: "P06", title: "Intro to LangGraph", theme: "Graph-based agent workflows", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 6 Intro to LangGraph_updated (2).pdf" },
+      { n: "P07", title: "Advanced LangGraph", theme: "Advanced graph-based agent workflows", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 7 Some Advanced Topics of LangGraph (1).pdf" },
+      { n: "P08", title: "Intro to Deep Agents", theme: "Advanced agent topics", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/Presentation 8 Intro to Deep Agents and Miscellaneous Item (1).pdf" },
+      { n: "T01", title: "Selenium Test Materials", theme: "Test cases and automation zip", cat: "agentic-ai", qmd: null, html: "courses/04-mban-5510-Agentic AI/Lectures/test_cases.txt" }
+    ],
+    assignments: [],
+    readme: "courses/04-mban-5510-Agentic AI/"
+  },
+  {
+    id: "05-mban-5550-Enterprise-Data-Management",
+    number: "05",
+    code: "MBAN 5550",
+    name: "Enterprise Data Management",
+    term: "Fall 2025",
+    instructor: "Dr. Hai Wang",
+    level: "Graduate (MBAN)",
+    focus: "Enterprise data management, database modeling, SQL, Power BI, Tableau, and business intelligence",
+    summary: "Enterprise data management coursework covering data management foundations, database modeling, SQL project work, reporting, Power BI, Tableau, and applied business intelligence deliverables.",
+    tags: ["Data Management", "SQL", "Power BI", "Tableau", "BI"],
+    categories: ["data-management", "analytics"],
+    keyConcepts: [
+      { term: "Enterprise data management", desc: "organizing business data for reliable analysis and decision support" },
+      { term: "Database modeling", desc: "designing structured data models and relationships" },
+      { term: "SQL projects", desc: "database project files, schema artifacts, and solution work" },
+      { term: "Business intelligence", desc: "turning managed data into reports and dashboards" },
+      { term: "Power BI", desc: "interactive reporting with PBIX project files" },
+      { term: "Tableau", desc: "visual analytics and dashboard-focused reporting" }
+    ],
+    tools: ["SQL", "Power BI", "Tableau", "Visual Studio", "PDF"],
+    studyGuides: [
+      {
+        terms: ["sql", "database query", "relational database", "schema"],
+        title: "SQL",
+        answer: "SQL is the language used to define, query, and manage relational databases. For this course, it connects the database modeling work to practical questions like selecting records, joining related tables, and turning structured data into useful reporting inputs.",
+        links: [
+          { label: "Lecture 2", path: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 2.pdf", type: "lecture" },
+          { label: "Lecture 3", path: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 3.pdf", type: "lecture" },
+          { label: "Summary of Data Management", path: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Summary of Data Management.pdf", type: "summary" },
+          { label: "SQL Project Folder", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Pball/", type: "practice" }
+        ]
+      },
+      {
+        terms: ["power bi", "pbix"],
+        title: "Power BI",
+        answer: "Power BI is used to build interactive reports from prepared data models. Review the Power BI lecture notes first, then open the PBIX files when you want to inspect the dashboard and data model directly.",
+        links: [
+          { label: "Power BI Lectures", path: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lectures 7&8 - PowerBI.pdf", type: "lecture" },
+          { label: "SalesData PBIX", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/PamelaB_SalesData.pbix", type: "practice" }
+        ]
+      },
+      {
+        terms: ["tableau"],
+        title: "Tableau",
+        answer: "Tableau supports visual analytics and dashboard reporting. The Tableau lecture file is the best reading path for this topic before reviewing any dashboard deliverables.",
+        links: [
+          { label: "Tableau Lectures", path: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lectures 9&10 - Tableau.pdf", type: "lecture" }
+        ]
+      }
+    ],
+    labs: [
+      { n: "L01", title: "Lecture 1", theme: "Data management foundations", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 1.pdf" },
+      { n: "L02", title: "Lecture 2", theme: "Enterprise data management concepts", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 2.pdf" },
+      { n: "L03", title: "Lecture 3", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 3.pdf" },
+      { n: "L04", title: "Lecture 4", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 4.pdf" },
+      { n: "L05", title: "Lecture 5", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 5.pdf" },
+      { n: "L06", title: "Lecture 6", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 6.pdf" },
+      { n: "L07", title: "Lecture 7", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 7.pdf" },
+      { n: "L08", title: "Lecture 8", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 8.pdf" },
+      { n: "L09", title: "Lecture 9", theme: "Data management lecture materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lecture 9.pdf" },
+      { n: "PBI", title: "Power BI Lectures", theme: "Lectures 7 and 8 Power BI materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lectures 7&8 - PowerBI.pdf" },
+      { n: "TAB", title: "Tableau Lectures", theme: "Lectures 9 and 10 Tableau materials", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Lectures 9&10 - Tableau.pdf" },
+      { n: "SUM", title: "Summary Notes", theme: "Course summaries and teaching notes", cat: "data-management", qmd: null, html: "courses/05-mban-5550-Enterprise-Data-Management/lectures/Summary of Data Management.pdf" }
+    ],
+    assignments: [
+      { n: "A", title: "Assignment Folder", theme: "All MBAN 5550 assignments, reports, SQL project files, and BI deliverables", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/" },
+      { n: "A1", title: "Assignment 1", theme: "Assignment prompt and submitted PDF", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Assignment 1_PamelaB.pdf" },
+      { n: "A2", title: "Assignment 2", theme: "Enterprise data management assignment materials", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Assignment 2.pdf" },
+      { n: "DB", title: "Database Modeling", theme: "Motel reservation system database modeling materials", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Motel Reservation System - Database Modeling.pdf" },
+      { n: "SQL", title: "SQL Project", theme: "Visual Studio SQL project and database artifacts", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Pball/" },
+      { n: "PBI", title: "Power BI Files", theme: "SalesData, PowerBI-Oct30, and group project PBIX files", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/PamelaB_SalesData.pbix" },
+      { n: "P1", title: "Project 1", theme: "Project report, assessment, and supporting documents", path: "courses/05-mban-5550-Enterprise-Data-Management/assignments/Project 1 (3).pdf" }
+    ],
+    readme: "courses/05-mban-5550-Enterprise-Data-Management/"
+  }
+];
+
+// ============================================================
+// RENDER
+// ============================================================
+const grid = document.getElementById('courseGrid');
+const searchInput = document.getElementById('search');
+const resultsCount = document.getElementById('resultsCount');
+const activeFilterEl = document.getElementById('activeFilter');
+const emptyState = document.getElementById('emptyState');
+const homeView = document.getElementById('homeView');
+const detailView = document.getElementById('detailView');
+const detailContent = document.getElementById('detailContent');
+const searchInsights = document.getElementById('searchInsights');
+const statCourses = document.getElementById('statCourses');
+const statAssignments = document.getElementById('statAssignments');
+const statMaterials = document.getElementById('statMaterials');
+const statConcepts = document.getElementById('statConcepts');
+
+let currentFilter = 'all';
+let currentQuery = '';
+let activeCourseId = '';
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+}
+
+function highlight(text, query) {
+  if (!query) return escapeHtml(text);
+  const safe = escapeHtml(text);
+  const re = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  return safe.replace(re, '<mark>$1</mark>');
+}
+
+function resourceLabel(path) {
+  if (!path) return '';
+  const clean = path.split('?')[0].replace(/\/$/, '');
+  const ext = clean.includes('.') ? clean.split('.').pop().toLowerCase() : 'folder';
+  return ext === 'zip' ? 'html' : ext;
+}
+
+function normalizeText(value) {
+  return String(value || '').toLowerCase();
+}
+
+function textMatches(value, q) {
+  return normalizeText(value).includes(normalizeText(q));
+}
+
+function getStudyGuide(course, q) {
+  const query = normalizeText(q).trim();
+  if (!query) return null;
+  return (course.studyGuides || []).find(guide =>
+    guide.terms.some(term => textMatches(term, query) || textMatches(query, term))
+  ) || null;
+}
+
+function guideLinkMatches(link, q) {
+  return textMatches([link.label, link.type, link.path].join(' '), q);
+}
+
+function relatedMaterialsForGuide(course, guide) {
+  if (!guide) return [];
+  return course.labs.filter(material =>
+    guide.links.some(link => link.path === (material.html || material.qmd))
+  );
+}
+
+function courseText(course) {
+  return [
+    course.code, course.name, course.summary, course.focus,
+    ...course.tags,
+    ...course.keyConcepts.map(c => c.term + ' ' + c.desc),
+    ...course.tools,
+    ...(course.studyGuides || []).map(g => [g.title, g.answer, ...g.terms, ...g.links.map(l => l.label)].join(' ')),
+    ...(course.assignments || []).map(a => a.title + ' ' + a.theme),
+    ...course.labs.map(l => l.title + ' ' + l.theme)
+  ].join(' ');
+}
+
+function getSearchResults(q) {
+  const query = q.trim();
+  if (!query) return [];
+
+  const results = [];
+  courses.forEach(course => {
+    if (!courseMatchesFilter(course, currentFilter)) return;
+    const matchedGuide = getStudyGuide(course, query);
+
+    if (matchedGuide) {
+      const lecture = matchedGuide.links.find(link => link.type === 'lecture') || matchedGuide.links[0];
+      results.push({
+        type: 'Study guide',
+        title: matchedGuide.title,
+        context: `${matchedGuide.answer} Start with ${lecture.label}.`,
+        course: course.code,
+        courseId: course.id
+      });
+    }
+
+    if (textMatches([course.code, course.name, course.summary, course.focus, ...course.tags].join(' '), query)) {
+      results.push({
+        type: 'Course',
+        title: `${course.code} — ${course.name}`,
+        context: course.focus,
+        course: course.code,
+        courseId: course.id
+      });
+    }
+
+    course.keyConcepts.forEach(concept => {
+      if (textMatches(concept.term + ' ' + concept.desc, query)) {
+        results.push({
+          type: 'Concept',
+          title: concept.term,
+          context: concept.desc,
+          course: course.code,
+          courseId: course.id
+        });
+      }
+    });
+
+    (course.studyGuides || []).forEach(guide => {
+      if (matchedGuide !== guide && textMatches(guide.title + ' ' + guide.answer, query)) {
+        const lecture = guide.links.find(link => link.type === 'lecture') || guide.links[0];
+        results.push({
+          type: 'Study guide',
+          title: guide.title,
+          context: `${guide.answer} Start with ${lecture.label}.`,
+          course: course.code,
+          courseId: course.id
+        });
+      }
+    });
+
+    (course.assignments || []).forEach(assignment => {
+      if (textMatches(assignment.title + ' ' + assignment.theme, query)) {
+        results.push({
+          type: 'Assignment',
+          title: assignment.title,
+          context: assignment.theme,
+          course: course.code,
+          path: assignment.path
+        });
+      }
+    });
+
+    course.labs.forEach(material => {
+      if (textMatches(material.title + ' ' + material.theme, query)) {
+        results.push({
+          type: 'Material',
+          title: material.title,
+          context: material.theme,
+          course: course.code,
+          path: material.html || material.qmd
+        });
+      }
+    });
+  });
+
+  return results.slice(0, 8);
+}
+
+function renderSearchInsights() {
+  const q = currentQuery.trim();
+  if (!q) {
+    searchInsights.classList.remove('active');
+    searchInsights.innerHTML = '';
+    return;
+  }
+
+  const results = getSearchResults(q);
+  searchInsights.classList.add('active');
+
+  if (!results.length) {
+    searchInsights.innerHTML = `
+      <div class="search-insights-header">
+        <span>No quick results</span>
+        <button class="clear-search" type="button" data-clear-search>Clear</button>
+      </div>
+      <div class="empty-state" style="padding: 1.5rem;">Try a course code, assignment number, tool, or concept.</div>
+    `;
+    return;
+  }
+
+  searchInsights.innerHTML = `
+    <div class="search-insights-header">
+      <span>${results.length} quick result${results.length !== 1 ? 's' : ''}</span>
+      <button class="clear-search" type="button" data-clear-search>Clear</button>
+    </div>
+    <div class="search-result-list">
+      ${results.map(r => {
+        const href = r.path || `#${r.courseId}`;
+        const action = r.courseId && !r.path ? `data-course-id="${escapeHtml(r.courseId)}"` : '';
+        return `
+          <a class="search-result" href="${escapeHtml(href)}" ${action} ${r.path ? 'target="_blank"' : ''}>
+            <span class="result-type">${escapeHtml(r.type)}</span>
+            <span>
+              <span class="result-title">${highlight(r.title, q)}</span>
+              <span class="result-context">${highlight(r.context, q)}</span>
+            </span>
+            <span class="result-course">${escapeHtml(r.course)}</span>
+          </a>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function updateStats() {
+  statCourses.textContent = courses.length;
+  statAssignments.textContent = courses.reduce((sum, c) => sum + (c.assignments || []).length, 0);
+  statMaterials.textContent = courses.reduce((sum, c) => sum + c.labs.length, 0);
+  statConcepts.textContent = courses.reduce((sum, c) => sum + c.keyConcepts.length, 0);
+}
+
+function courseMatchesQuery(course, q) {
+  if (!q) return true;
+  return textMatches(courseText(course), q);
+}
+
+function courseMatchesFilter(course, filter) {
+  if (filter === 'all') return true;
+  return course.categories && course.categories.includes(filter);
+}
+
+function filterLabel(filter) {
+  const button = document.querySelector(`[data-filter="${filter}"]`);
+  return button ? button.textContent : filter;
+}
+
+function renderCards() {
+  const q = currentQuery.trim();
+  const filtered = courses.filter(c =>
+    courseMatchesFilter(c, currentFilter) && courseMatchesQuery(c, q)
+  );
+
+  // Also check if labs match — show the course card if any lab matches
+  const labMatchedCourses = q ? courses.filter(c =>
+    courseMatchesFilter(c, currentFilter) &&
+    c.labs.some(l => (l.title + ' ' + l.theme).toLowerCase().includes(q.toLowerCase()))
+  ) : [];
+
+  const allMatched = [...new Set([...filtered, ...labMatchedCourses])];
+
+  grid.innerHTML = '';
+
+  if (allMatched.length === 0) {
+    emptyState.classList.remove('hidden');
+    resultsCount.textContent = 'No matches';
+    activeFilterEl.textContent = '';
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  resultsCount.textContent = `${allMatched.length} course${allMatched.length !== 1 ? 's' : ''}`;
+  activeFilterEl.textContent = currentFilter !== 'all' ? `Filter: ${filterLabel(currentFilter)}` : (q ? 'Search active' : '');
+
+  allMatched.forEach(c => {
+    const matchedLabs = q ? c.labs.filter(l =>
+      (l.title + ' ' + l.theme).toLowerCase().includes(q.toLowerCase())
+    ) : [];
+    const matchedAssignments = q ? (c.assignments || []).filter(a =>
+      (a.title + ' ' + a.theme).toLowerCase().includes(q.toLowerCase())
+    ) : [];
+    const matchedConcepts = q ? c.keyConcepts.filter(k =>
+      (k.term + ' ' + k.desc).toLowerCase().includes(q.toLowerCase())
+    ) : [];
+
+    const extraBadges = [];
+    if (matchedLabs.length) extraBadges.push(`${matchedLabs.length} lab${matchedLabs.length !== 1 ? 's' : ''} match`);
+    if (matchedAssignments.length) extraBadges.push(`${matchedAssignments.length} assignment${matchedAssignments.length !== 1 ? 's' : ''} match`);
+    if (matchedConcepts.length) extraBadges.push(`${matchedConcepts.length} concept${matchedConcepts.length !== 1 ? 's' : ''} match`);
+
+    const card = document.createElement('a');
+    card.className = 'course-card';
+    card.href = '#' + c.id;
+    card.onclick = (e) => { e.preventDefault(); showCourse(c.id); };
+    card.innerHTML = `
+      <div class="course-number">Course ${c.number} · ${escapeHtml(c.term)}</div>
+      <h3>${highlight(c.code, q)} — ${highlight(c.name, q)}</h3>
+      <div class="course-term">${escapeHtml(c.instructor)} · ${escapeHtml(c.level)}</div>
+      <div class="course-desc">${highlight(c.summary.substring(0, 180) + (c.summary.length > 180 ? '…' : ''), q)}</div>
+      <div class="course-metrics">
+        <div class="metric"><strong>${c.keyConcepts.length}</strong><span>Concepts</span></div>
+        <div class="metric"><strong>${(c.assignments || []).length}</strong><span>Assign.</span></div>
+        <div class="metric"><strong>${c.labs.length}</strong><span>Materials</span></div>
+      </div>
+      <div class="course-tags">
+        ${c.tags.map(t => `<span class="tag">${highlight(t, q)}</span>`).join('')}
+        ${(c.assignments && c.assignments.length) ? `<span class="tag highlight">${c.assignments.length} assignments</span>` : ''}
+        ${extraBadges.map(b => `<span class="tag highlight">${escapeHtml(b)}</span>`).join('')}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function renderStudyGuide(course, q) {
+  const guide = getStudyGuide(course, q);
+  if (!guide) return '';
+  return `
+    <div class="study-guide">
+      <div class="eyebrow">Search guide</div>
+      <h3>${highlight(guide.title, q)}</h3>
+      <p>${highlight(guide.answer, q)}</p>
+      <div class="study-guide-links">
+        ${guide.links.map(link => `
+          <a class="lab-link" href="${escapeHtml(link.path)}" target="_blank">
+            ${escapeHtml(link.label)} · ${escapeHtml(link.type)}
+          </a>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function showCourse(id) {
+  const c = courses.find(x => x.id === id);
+  if (!c) return;
+  activeCourseId = id;
+  history.replaceState(null, '', `#${id}`);
+  homeView.classList.add('hidden');
+  detailView.classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  const q = currentQuery.trim();
+  const studyGuide = getStudyGuide(c, q);
+  const guideMaterials = relatedMaterialsForGuide(c, studyGuide);
+  const visibleLabs = q
+    ? [...new Set([
+        ...c.labs.filter(l => (l.title + ' ' + l.theme).toLowerCase().includes(q.toLowerCase())),
+        ...guideMaterials
+      ])]
+    : c.labs;
+  const visibleAssignments = q
+    ? (c.assignments || []).filter(a =>
+        (a.title + ' ' + a.theme).toLowerCase().includes(q.toLowerCase()) ||
+        (studyGuide && studyGuide.links.some(link => link.path === a.path || guideLinkMatches(link, q)))
+      )
+    : (c.assignments || []);
+
+  detailContent.innerHTML = `
+    <div class="detail-header">
+      <div class="course-number" style="margin-bottom: 0.75rem;">Course ${c.number}</div>
+      <h2>${escapeHtml(c.code)} — ${escapeHtml(c.name)}</h2>
+      <div class="detail-meta">${escapeHtml(c.term)} · ${escapeHtml(c.instructor)} · ${escapeHtml(c.level)}</div>
+      <p class="detail-summary">${escapeHtml(c.summary)}</p>
+      ${q ? `<button class="back-btn" style="margin: 0 0 1rem 0;" onclick="searchInput.value=''; currentQuery=''; renderSearchInsights(); showCourse('${escapeHtml(c.id)}');">Clear search filter</button>` : ''}
+      <a class="readme-link" href="${c.readme}" target="_blank">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+        Open course folder
+      </a>
+    </div>
+
+    ${q ? renderStudyGuide(c, q) : ''}
+
+    <div class="detail-section">
+      <h3>Key concepts <span style="font-family:var(--mono); color: var(--ink-muted); font-weight: 400; margin-left: 0.5rem; text-transform: none; letter-spacing: 0;">${c.keyConcepts.length}</span></h3>
+      <ul class="concept-list">
+        ${c.keyConcepts.map(k => `<li><strong>${highlight(k.term, q)}</strong> — ${highlight(k.desc, q)}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="detail-section">
+      <h3>Tools &amp; packages</h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        ${c.tools.map(t => `<span class="tag">${highlight(t, q)}</span>`).join('')}
+      </div>
+    </div>
+
+    ${visibleAssignments.length ? `
+    <div class="detail-section">
+      <h3>Assignments <span style="font-family:var(--mono); color: var(--ink-muted); font-weight: 400; margin-left: 0.5rem; text-transform: none; letter-spacing: 0;">${visibleAssignments.length} of ${(c.assignments || []).length}</span></h3>
+      <div class="lab-list">
+        ${visibleAssignments.map(a => `
+          <div class="lab-item">
+            <span class="lab-num">${a.n}</span>
+            <div class="lab-content">
+              <h4>${highlight(a.title, q)}</h4>
+              <div class="lab-theme">${highlight(a.theme, q)}</div>
+            </div>
+            <div class="lab-actions">
+              <a class="lab-link" href="${a.path}" target="_blank">${resourceLabel(a.path)}</a>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    <div class="detail-section">
+      <h3>Materials <span style="font-family:var(--mono); color: var(--ink-muted); font-weight: 400; margin-left: 0.5rem; text-transform: none; letter-spacing: 0;">${visibleLabs.length} of ${c.labs.length}</span></h3>
+      <div class="lab-list">
+        ${visibleLabs.map(l => `
+          <div class="lab-item">
+            <span class="lab-num">${l.n}</span>
+            <div class="lab-content">
+              <h4>${highlight(l.title, q)}</h4>
+              <div class="lab-theme">${highlight(l.theme, q)}</div>
+            </div>
+            <div class="lab-actions">
+              ${l.qmd ? `<a class="lab-link" href="${l.qmd}" target="_blank">${resourceLabel(l.qmd)}</a>` : ''}
+              ${l.html ? `<a class="lab-link" href="${l.html}" target="_blank">${resourceLabel(l.html)}</a>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function showHome() {
+  activeCourseId = '';
+  history.replaceState(null, '', location.pathname);
+  detailView.classList.remove('active');
+  homeView.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ============================================================
+// EVENTS
+// ============================================================
+searchInput.addEventListener('input', (e) => {
+  currentQuery = e.target.value;
+  renderSearchInsights();
+  if (detailView.classList.contains('active')) {
+    // re-render current detail view with search
+    const activeId = activeCourseId || courses.find(c => c.id === location.hash.slice(1))?.id || courses[0].id;
+    showCourse(activeId);
+  } else {
+    renderCards();
+  }
+});
+
+document.getElementById('filters').addEventListener('click', (e) => {
+  if (!e.target.matches('.filter-chip')) return;
+  document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  currentFilter = e.target.dataset.filter;
+  renderSearchInsights();
+  renderCards();
+});
+
+searchInsights.addEventListener('click', (e) => {
+  const clearButton = e.target.closest('[data-clear-search]');
+  if (clearButton) {
+    searchInput.value = '';
+    currentQuery = '';
+    renderSearchInsights();
+    renderCards();
+    searchInput.focus();
+    return;
+  }
+
+  const result = e.target.closest('[data-course-id]');
+  if (!result) return;
+  e.preventDefault();
+  showCourse(result.dataset.courseId);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && document.activeElement !== searchInput) {
+    e.preventDefault();
+    searchInput.focus();
+  }
+  if (e.key === 'Escape') {
+    if (document.activeElement === searchInput) {
+      searchInput.value = '';
+      currentQuery = '';
+      renderSearchInsights();
+      renderCards();
+      searchInput.blur();
+    } else if (detailView.classList.contains('active')) {
+      showHome();
+    }
+  }
+});
+
+// Initial render
+updateStats();
+renderCards();
+if (location.hash) {
+  showCourse(location.hash.slice(1));
+}
+</script>
+
+</body>
+</html>

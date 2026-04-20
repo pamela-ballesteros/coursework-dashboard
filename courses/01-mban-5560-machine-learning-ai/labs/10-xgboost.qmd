@@ -1,0 +1,492 @@
+---
+title: "<span style='color: red; font-size: 30px;'>XGBoost</span>"
+title-block-banner-color: "red"
+author: "Dr. Aydede"
+subtitle: "MBAN 5560 - Winter 2026"
+format:
+  html:
+    embed-resources: true
+    code-background: true
+toc: true
+toc-float: true
+number-sections: true
+theme: united
+highlight: tango
+---
+
+# What is XGBoost?
+
+XGBoost (**Extreme Gradient Boosting**) is an optimized implementation of gradient boosting developed by Tianqi Chen and Carlos Guestrin (2016). It uses the **same gradient boosting framework** we covered in the Boosting notebook — sequential trees fit to pseudo-residuals — but adds several engineering and algorithmic improvements that make it faster, more accurate, and less prone to overfitting.
+
+If you understood GBM, you already understand the core of XGBoost. The differences are in the details:
+
+::: {.callout-note}
+## What XGBoost adds over standard GBM
+
+1. **Regularized objective function**: Standard GBM minimizes only the loss function (e.g., SSE). XGBoost adds **L1 (Lasso) and L2 (Ridge) penalties** on the tree structure (number of leaves, leaf weights) directly into the objective. This built-in regularization reduces overfitting without needing external tricks. The idea is the same as in regularized regression:
+
+    - **OLS regression** minimizes: $\sum(y_i - \hat{y}_i)^2$
+    - **Ridge regression** adds an L2 penalty: $\sum(y_i - \hat{y}_i)^2 + \lambda \sum \beta_j^2$ — shrinks coefficients toward zero
+    - **Lasso regression** adds an L1 penalty: $\sum(y_i - \hat{y}_i)^2 + \alpha \sum |\beta_j|$ — can shrink coefficients exactly to zero
+
+    In XGBoost, the same logic applies, but instead of penalizing regression coefficients $\beta_j$, it penalizes the **leaf weights** in the trees. What is a leaf weight? In a decision tree, each terminal node (leaf) outputs a single prediction value for all observations that land in it — this value is the leaf weight. For example, in a regression tree, if a leaf contains observations with target values {2, 3, 4}, the leaf weight is 3.0 (the mean). By penalizing these leaf weights, XGBoost pushes predictions toward zero — making each tree more conservative and less prone to overfitting. The parameter `lambda` controls L2 (Ridge-like) regularization and `alpha` controls L1 (Lasso-like) regularization. Larger values = stronger penalty = simpler trees = less overfitting.
+
+2. **Approximate split finding**: Instead of evaluating every possible split point for every feature (which is slow), XGBoost uses **quantile sketches** to propose a smaller set of candidate split points. This makes it much faster on large datasets with minimal loss in accuracy.
+
+3. **Sparsity-aware learning**: XGBoost automatically learns the **optimal direction for missing values** at each split. You don't need to impute missing data — the algorithm handles it natively by learning whether NAs should go left or right.
+
+4. **Parallel split computation**: While the trees themselves are still sequential (each tree depends on the previous one), XGBoost parallelizes the **split search within each tree** — evaluating different features simultaneously. Combined with cache-aware memory access, this makes individual tree construction much faster.
+
+5. **Built-in early stopping**: XGBoost can monitor a validation set during training and automatically stop when the error stops improving — no need to pre-specify the number of trees.
+:::
+
+The result: XGBoost is typically **5-10x faster** than the `gbm` package in R and often produces equal or better predictions, especially on larger datasets.
+
+# From GBM to XGBoost: Parameter Translation
+
+If you learned GBM first, the transition to XGBoost is straightforward. Most parameters have direct equivalents:
+
+| GBM (`gbm` package) | XGBoost | What it controls |
+|---|---|---|
+| `shrinkage` | `eta` | Learning rate (step size). Default: GBM = 0.1, XGBoost = 0.3 |
+| `interaction.depth` | `max_depth` | Maximum tree depth. Default: GBM = 1, XGBoost = 6 |
+| `n.trees` | `nrounds` | Number of boosting iterations (trees) |
+| `bag.fraction` | `subsample` | Fraction of data used per tree. Default: GBM = 1, XGBoost = 1 |
+| `n.minobsinnode` | `min_child_weight` | Minimum observations in a terminal node |
+| `distribution` | `objective` | Loss function (`"gaussian"` → `"reg:squarederror"`, `"bernoulli"` → `"binary:logistic"`) |
+| — | `colsample_bytree` | Fraction of *features* sampled per tree (**new** — like RF's `mtry`) |
+| — | `lambda` | L2 regularization on leaf weights (**new**) |
+| — | `alpha` | L1 regularization on leaf weights (**new**) |
+
+::: {.callout-note}
+## The key new parameters
+
+The parameters that XGBoost adds beyond GBM are the regularization terms (`lambda`, `alpha`) and the column subsampling (`colsample_bytree`). These give you more knobs to control overfitting. In GBM, your main tools against overfitting were shrinkage and bag.fraction. In XGBoost, you also have L1/L2 penalties and feature subsampling.
+:::
+
+# XGBoost in R: The Workflow
+
+The `xgboost` package in R has a different workflow from `gbm`. Instead of passing a formula and data frame, you need to:
+
+1. **Prepare the data** as an `xgb.DMatrix` object (a special format optimized for repeated access during training)
+2. **Set parameters** as a named list
+3. **Train** with `xgb.train()`
+
+## Classification Example: Mushroom Data
+
+We'll predict whether a mushroom is edible or poisonous using the classic agaricus dataset (included in the xgboost package). The original mushroom data has **22 categorical features** describing physical characteristics like cap shape, cap color, odor, gill size, habitat, etc. These 22 features have been **one-hot encoded** into **126 binary columns** — for example, "cap-shape" (which has 6 levels: bell, conical, convex, flat, knobbed, sunken) becomes 6 separate binary columns. The dataset has 8,124 observations total.
+
+::: {.callout-important}
+## This data is pre-packaged — not how real data looks!
+
+The agaricus dataset comes **already pre-processed** inside the `xgboost` package. It arrives as a list with two components:
+
+- **`$data`**: A **sparse matrix** of 126 one-hot encoded features (all 0s and 1s)
+- **`$label`**: A numeric vector (0 = edible, 1 = poisonous)
+
+This is **not** how you'll encounter data in real projects. Normally you'll start with a data frame and need to convert it yourself. We show how to do that [below](#from-data-frame-to-xgboost).
+:::
+
+```{r, message=FALSE, warning=FALSE}
+library(xgboost)
+
+# Load the built-in mushroom dataset
+data(agaricus.train, package = 'xgboost')
+data(agaricus.test, package = 'xgboost')
+train <- agaricus.train
+test <- agaricus.test
+```
+
+Let's explore the structure properly — `str()` on a 126-column sparse matrix is not helpful. The `train` object is just a list with two components:
+
+```{r}
+names(train)
+```
+
+```{r}
+# Dimensions of the feature matrix and label vector
+dim(train$data)
+dim(test$data)
+```
+
+```{r}
+# Label distribution: 0 = edible, 1 = poisonous
+table(train$label)
+```
+
+The 126 feature names reveal the one-hot encoding pattern — each original categorical feature is split into multiple binary columns:
+
+```{r}
+# Feature names follow the pattern "original_feature=level"
+feature_names <- colnames(train$data)
+length(feature_names)
+head(feature_names, 15)
+```
+
+```{r}
+# Group features by their original categorical variable (before the "=")
+original_features <- sub("=.*", "", feature_names)
+sort(table(original_features), decreasing = TRUE)
+```
+
+So the 126 columns come from one-hot encoding **22 original categorical variables**, each with 2-12 levels. The data is stored as a **sparse matrix** — cells containing 0 are not stored in memory. This is very efficient when most values are 0 (common with one-hot encoded categorical features):
+
+```{r}
+# Peek at the first 5 rows and 6 columns of the sparse matrix
+train$data[1:5, 1:6]
+```
+
+### Preparing the DMatrix
+
+`xgb.DMatrix` is XGBoost's internal data structure. It stores the feature matrix and labels together in an optimized format:
+
+```{r}
+dtrain <- xgb.DMatrix(data = train$data, label = train$label)
+dtest <- xgb.DMatrix(data = test$data, label = test$label)
+```
+
+### Setting Parameters and Training
+
+We define the model parameters as a list and pass them to `xgb.train()`:
+
+```{r}
+params <- list(
+  max_depth = 3,                   # tree depth (like interaction.depth in GBM)
+  eta = 0.1,                       # learning rate (like shrinkage in GBM)
+  subsample = 0.8,                 # use 80% of data per tree (like bag.fraction)
+  colsample_bytree = 0.8,          # use 80% of features per tree (like RF's mtry)
+  objective = "binary:logistic",   # binary classification with logistic loss
+  eval_metric = "auc"              # evaluation metric to track
+)
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 50                     # 50 boosting rounds
+)
+
+xgb_model
+```
+
+::: {.callout-note}
+## Understanding the parameters
+
+- **`max_depth = 3`**: Each tree has at most 3 levels of splits. Deeper trees capture more complex patterns but risk overfitting. Start with 3-6.
+- **`eta = 0.1`**: Each tree contributes 10% of its prediction. Smaller values need more rounds but typically give better results. Common range: 0.01-0.3.
+- **`subsample = 0.8`**: Each tree sees 80% of the training data (random subsample). Adds regularization.
+- **`colsample_bytree = 0.8`**: Each tree sees 80% of the features. Similar to Random Forest's feature subsampling — adds diversity.
+- **`objective = "binary:logistic"`**: The loss function. Outputs probabilities via the logistic (sigmoid) function.
+- **`eval_metric = "auc"`**: What metric to display during training. Doesn't affect the model — just what you see.
+:::
+
+### Predictions and Evaluation
+
+The `predict()` function returns probabilities (because we used `binary:logistic`):
+
+```{r}
+phat <- predict(xgb_model, dtest)
+head(phat)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# AUC
+library(ROCR)
+
+pred_rocr <- prediction(phat, test$label)
+auc_val <- performance(pred_rocr, "auc")
+auc_val@y.values[[1]]
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Confusion Matrix
+library(caret)
+
+yhat <- as.numeric(phat > 0.5)
+yhat_factor <- factor(yhat, levels = c(0, 1))
+test_label_factor <- factor(test$label, levels = c(0, 1))
+
+confusionMatrix(yhat_factor, test_label_factor, positive = "1")
+```
+
+The mushroom dataset is relatively easy — even a simple model achieves near-perfect accuracy. The value of XGBoost becomes more apparent on harder, noisier, real-world datasets.
+
+# Monitoring Training with Evals (Watchlist)
+
+One of XGBoost's most useful features is the ability to **monitor training and validation error at every round**. This lets you see in real-time whether the model is overfitting.
+
+An **evals** list (historically called "watchlist") is a named list of DMatrix objects that XGBoost will evaluate after each boosting round:
+
+```{r}
+# Define an evals list: monitor both training and test error
+evals <- list(train = dtrain, test = dtest)
+
+# Train with evals — XGBoost prints errors at each round
+xgb_watch <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  evals = evals,
+  verbose = 1           # print progress (set to 0 to suppress)
+)
+```
+
+::: {.callout-note}
+## Reading the evals output
+
+Each line shows the evaluation metric (AUC) for each dataset at that round:
+
+- **`train-auc`**: AUC on the training data — should always improve (or stay the same) as more trees are added.
+- **`test-auc`**: AUC on the test data — improves at first, then may **plateau or decrease** (overfitting).
+
+When `test-auc` stops improving, adding more trees is wasteful (or harmful). This is exactly where **early stopping** comes in.
+:::
+
+# Early Stopping
+
+Instead of guessing how many rounds to use, XGBoost can **automatically stop training** when the validation metric hasn't improved for a specified number of rounds. This is one of the most practical features for tuning:
+
+```{r}
+xgb_early <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 500,                       # allow up to 500 rounds
+  evals = evals,
+  early_stopping_rounds = 10,          # stop if no improvement for 10 rounds
+  verbose = 0                          # suppress output
+)
+
+# How many rounds were actually used?
+xgb.attributes(xgb_early)$best_iteration
+xgb.attributes(xgb_early)$best_score
+```
+
+::: {.callout-note}
+## How early stopping works
+
+- XGBoost trains up to `nrounds = 500` trees, but monitors the **test** metric at each round.
+- If the test metric doesn't improve for `early_stopping_rounds = 10` consecutive rounds, training stops.
+- `xgb.attributes(model)$best_iteration` tells you the optimal number of rounds, and `$best_score` is the metric at that point.
+- When predicting, XGBoost automatically uses only the trees up to `best_iteration`.
+
+**This replaces the need for `cv.folds` in GBM.** Instead of running expensive k-fold CV to find the optimal number of trees, you just set a generous `nrounds` with early stopping and let XGBoost find the sweet spot automatically. Much faster.
+:::
+
+# Hyperparameter Tuning Strategy
+
+XGBoost has many parameters, and tuning them all at once is overwhelming. A practical, step-by-step approach works best:
+
+::: {.callout-note}
+## Recommended tuning order
+
+**Step 1: Fix `eta = 0.1`, use early stopping to find `nrounds`.**
+Start with a moderate learning rate and let early stopping determine how many trees you need. This gives you a baseline.
+
+**Step 2: Tune tree complexity — `max_depth` and `min_child_weight`.**
+These control how complex each individual tree is. `min_child_weight` is the minimum number of observations required in a terminal node (like `n.minobsinnode` in GBM — we didn't use it above, so it took the default of 1). Deeper trees with fewer observations per leaf = more complex = higher risk of overfitting. Try `max_depth` in {3, 5, 7, 9} and `min_child_weight` in {1, 3, 5, 7}.
+
+**Step 3: Tune randomization — `subsample` and `colsample_bytree`.**
+These add stochasticity (like stochastic gradient boosting in GBM). Try values in {0.6, 0.8, 1.0} for both.
+
+**Step 4: Tune regularization — `lambda` and `alpha`.**
+These are the L2 and L1 penalties on leaf weights introduced in Section 1 (we didn't set them above, so they took defaults: `lambda = 1`, `alpha = 0`). `lambda` shrinks leaf weights toward zero (like Ridge); `alpha` can push some to exactly zero (like Lasso). Try `lambda` in {0, 0.1, 1, 10} and `alpha` in {0, 0.1, 1}.
+
+**Step 5: Lower `eta` and re-run.**
+Once you have good values for all other params, lower `eta` to 0.01 or 0.05, increase `nrounds` to 1000+, and use early stopping again. Slower learning with more rounds often gives the best final model.
+:::
+
+## Example: Tuning depth and min_child_weight
+
+Here's a practical example of Step 2 — tuning tree complexity using XGBoost's built-in cross-validation function `xgb.cv()`:
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+# Grid for Step 2: tree complexity
+depth_grid <- expand.grid(
+  max_depth = c(3, 5, 7),
+  min_child_weight = c(1, 3, 5)
+)
+
+# Store results
+depth_grid$best_auc <- 0
+depth_grid$best_nrounds <- 0
+
+for (i in 1:nrow(depth_grid)) {
+  
+  params_tune <- list(
+    max_depth = depth_grid$max_depth[i],
+    min_child_weight = depth_grid$min_child_weight[i],
+    eta = 0.1,
+    subsample = 0.8,
+    colsample_bytree = 0.8,
+    objective = "binary:logistic",
+    eval_metric = "auc"
+  )
+  
+  # xgb.cv runs k-fold CV internally — no need to split data yourself
+  cv_result <- xgb.cv(
+    params = params_tune,
+    data = dtrain,
+    nrounds = 200,
+    nfold = 5,
+    early_stopping_rounds = 10,
+    verbose = 0
+  )
+  
+  # Record the best AUC and the round it occurred at
+  eval_log <- as.data.frame(cv_result$evaluation_log)
+  test_col <- grep("test.*auc.*mean", names(eval_log), value = TRUE)[1]
+  best_idx <- which.max(eval_log[[test_col]])
+  depth_grid$best_auc[i] <- eval_log[[test_col]][best_idx]
+  depth_grid$best_nrounds[i] <- best_idx
+}
+
+depth_grid |> dplyr::arrange(dplyr::desc(best_auc))
+```
+
+::: {.callout-note}
+## Reading the tuning results
+
+- **`best_auc`**: The best 5-fold CV AUC achieved by each configuration.
+- **`best_nrounds`**: How many boosting rounds were needed (found by early stopping).
+- Pick the configuration with the highest `best_auc` and use those values going forward.
+
+Notice that `xgb.cv()` combines **cross-validation and early stopping in one call** — it runs k-fold CV, tracks the validation metric at each round across all folds, and stops when the average metric stops improving. This is much more efficient than the manual grid search we did with `gbm`.
+:::
+
+# Practical Tips
+
+::: {.callout-note}
+## When to use XGBoost vs. GBM vs. Random Forest
+
+| Situation | Recommendation |
+|---|---|
+| **Large dataset** (10K+ rows) | XGBoost — significantly faster than GBM |
+| **Small dataset** (< 1K rows) | GBM or RF — less risk of overfitting, simpler to tune |
+| **Many features, some irrelevant** | XGBoost with `colsample_bytree` < 1, or RF |
+| **Missing data** | XGBoost — handles NAs natively |
+| **Need interpretability** | RF with variable importance, or a single decision tree |
+| **Quick baseline** | RF — minimal tuning needed |
+| **Maximum predictive accuracy** | XGBoost with careful tuning |
+| **Comparing multiple models** | Use the same external train/test splits for fair comparison |
+:::
+
+::: {.callout-note}
+## Common pitfalls
+
+1. **Overfitting with too many rounds**: Always use early stopping or CV to determine `nrounds`. Never just set `nrounds = 5000` and hope for the best.
+2. **Learning rate too high**: `eta = 0.3` (the default) is aggressive. Lower it to 0.05-0.1 for better results, and compensate with more rounds.
+3. **Forgetting `colsample_bytree`**: This is one of the most effective regularization tools in XGBoost, but many people leave it at 1.0. Try 0.6-0.8.
+4. **Not using `evals`**: If you're not monitoring validation error during training, you're flying blind.
+5. **Tuning too many parameters at once**: Follow the step-by-step strategy above. Tune 2 parameters at a time, not all 8.
+:::
+
+## Feature Importance in XGBoost
+
+Like GBM, XGBoost provides variable importance scores. The `xgb.importance()` function extracts them:
+
+```{r, warning=FALSE, message=FALSE}
+# Get importance scores
+importance <- xgb.importance(model = xgb_model)
+head(importance, 10)
+```
+
+```{r}
+# Plot the top 10 most important features
+xgb.plot.importance(importance, top_n = 10)
+```
+
+::: {.callout-note}
+## Importance metrics
+
+XGBoost reports three importance measures:
+
+- **Gain**: The average improvement in the loss function when this feature is used in a split (similar to GBM's relative influence / MDI). **Most useful for understanding which features drive predictions.**
+- **Cover**: The average number of observations in the nodes where this feature is used for splitting.
+- **Frequency**: How often this feature appears in splits across all trees. Less informative — a feature used many times in shallow splits may not contribute much gain.
+
+Use **Gain** as your primary importance metric, similar to how we used `MeanDecreaseGini` in Random Forest.
+:::
+
+# From Data Frame to XGBoost {#from-data-frame-to-xgboost}
+
+The mushroom example above used pre-packaged data that was already a sparse matrix. In real projects, you'll start with a **data frame** and need to convert it yourself. Here's how:
+
+## The Problem
+
+XGBoost requires a **numeric matrix** as input — it cannot handle factors, character columns, or formulas directly. If your data frame has categorical variables, you need to **one-hot encode** them first (just like someone already did for the mushroom data).
+
+## Step-by-step: Data Frame → xgb.DMatrix
+
+```{r, message=FALSE, warning=FALSE}
+# Let's create a simple example data frame with mixed types
+df <- data.frame(
+  price = c(250, 180, 320, 150, 275, 200, 400, 190),
+  size = c("large", "small", "large", "medium", "large", "small", "large", "medium"),
+  color = c("red", "blue", "red", "green", "blue", "red", "green", "blue"),
+  sold = c(1, 0, 1, 0, 1, 0, 1, 0)  # target variable
+)
+df
+```
+
+```{r}
+# Step 1: Separate features (X) and target (y)
+y <- df$sold
+X <- df[, c("price", "size", "color")]   # everything except the target
+```
+
+```{r}
+# Step 2: One-hot encode categorical variables using model.matrix()
+# The "~ . - 1" formula means: use all columns, no intercept (so we get all dummy levels)
+X_matrix <- model.matrix(~ . - 1, data = X)
+X_matrix
+```
+
+**Alternative: `caret::dummyVars()`** — since we already loaded `caret` earlier, this is another clean option:
+
+```{r}
+# Same result using caret::dummyVars()
+dv <- dummyVars(~ ., data = X)       # create the encoding recipe
+X_matrix2 <- predict(dv, newdata = X) # apply it
+X_matrix2
+```
+
+::: {.callout-note}
+## `model.matrix()` vs. `dummyVars()`
+
+Both do one-hot encoding. The key differences:
+
+- **`model.matrix(~ . - 1, ...)`**: Base R. Need `- 1` to get full encoding; otherwise drops one level per factor.
+- **`dummyVars(~ ., ...)`**: From `caret`. Always does full one-hot encoding by default — no `- 1` trick needed.
+- **Train/test consistency**: With `dummyVars()`, you create the recipe on training data (`dv <- dummyVars(~ ., data = X_train)`) and then `predict(dv, newdata = X_test)` to ensure the test set gets the exact same columns — even if it's missing a level.
+
+Either works. Use whichever feels more natural.
+:::
+
+```{r}
+# Step 3: Create the xgb.DMatrix
+dtrain_df <- xgb.DMatrix(data = X_matrix, label = y)
+dtrain_df
+```
+
+## Quick Reference
+
+```r
+# The general pattern for converting any data frame to XGBoost format:
+
+# 1. Separate target and features
+y_train <- train_df$target_column
+X_train <- train_df[, -which(names(train_df) == "target_column")]
+
+# 2. One-hot encode (handles both numeric and categorical columns)
+X_matrix <- model.matrix(~ . - 1, data = X_train)
+
+# 3. Create DMatrix
+dtrain <- xgb.DMatrix(data = X_matrix, label = y_train)
+
+# Repeat for test data using the same process
+```
+
+::: {.callout-tip}
+## Handling missing values
+
+One advantage of XGBoost is that it handles `NA` values natively — you don't need to impute them. Just leave them as `NA` in your matrix and XGBoost will learn the optimal split direction for missing values automatically. However, `model.matrix()` drops rows with `NA` by default. To preserve them, set `options(na.action = "na.pass")` before calling `model.matrix()`.
+:::

@@ -1,0 +1,243 @@
+
+/*************************************************************************************************
+This STATA do file implements an event study of stock price reaction to acquisition announcements.
+@ Dr. M.M. Rahaman
+Canada Research Chair & Associate Professor of Finance
+Sobey School of Business
+Saint Mary's University
+Please do not circulate or share without the permission.
+**************************************************************************************************
+
+Question: Does Mergers and Acquisitions (M&A) Create Value for Shareholders in the Short Run?
+
+**************************************************************************************************
+Empirical Test: We can design an event study to empirically test the research question. 
+We want to investigate whether market, in general, thinks that mergers and acquisitions 
+(M&A) are value enhancing or value destroying activities. If on average market reacts 
+positively to acquisition announcements, then we can reasonably conclude that M&As are 
+value  enhancing activities. If, on the other hand, market reacts negatively to acquisition 
+announcements, then we can reasonably conclude that M&As are value destroying activities. 
+**************************************************************************************************/
+
+
+clear all
+capture log close
+log using MBAN_EventStudyClass, replace
+cd "C:\Users\Mohammad Rahaman\Dropbox\Course Materials\SMU2025_2026\MBAN\Lecture Notes\Event Study"
+
+set more off
+set memory 5g
+set matsize 5000
+set maxvar 32000
+
+
+/*************************************************************************************************
+You need to follow the following steps to do an event study:
+
+Step 1: Cleaning the data and Calculating the Event and Estimation Windows. Here, you need to be 
+careful about multiple event.
+Step 2: Estimating Normal Performance. Here, you need to decide what kind of economic model you 
+want to use to estimate normal performance.
+Step 3: Estimating the Abnormal and Cumulative Abnormal Returns.
+Step 4: Testing for Significance of individual event.
+Step 5: Testing for significance across all events.
+	
+*************************************************************************************************/
+
+
+*******************************************************************************************
+*Step 1: Preparing the dataset, estimation and event window:
+******************************************************************************************
+
+
+*Dealing with multiple events:
+/*1: Find out how many event dates there are for each company*/
+
+use acq_dates1979_2006.dta, clear
+gen year=year(date_announce)
+keep if year==2005
+sort iperm date_announce
+
+tempfile acq_dates2005
+quietly save `acq_dates2005', replace
+bysort iperm: gen eventcount=_N
+
+
+/*2: Cut the dataset down to just one observation for each company. Each company observation 
+is associated with the count of event dates for that company. Save this as a new dataset - 
+don't overwrite your dataset of event dates!*/ 
+
+
+bysort iperm: keep if _n==1
+sort iperm
+keep iperm eventcount 
+tempfile eventcount
+quietly save `eventcount', replace
+clear
+
+
+/* 3:The next step is to merge the new `eventcount' dataset with your dataset of stock data */
+
+
+use crsp_data2003_2006.dta, clear
+gen year=year(date)
+keep if year>=2003 & year<=2005
+sort iperm date
+tempfile crsp_data2003_2005
+quietly save `crsp_data2003_2005', replace
+
+sort iperm
+merge m:1 iperm using `eventcount'
+tab _merge
+keep if _merge==3
+drop _merge 
+
+
+/*4: Now use Stata's 'expand' command to create the duplicate observations. Essentially, 
+what you are doing is copying all data for a firms x number of times if the firm makes x 
+number of mergers and acquisitions announcements in 2005.*/
+
+expand eventcount
+
+/*5: Now, you need to create a variable that indicates which 'set' of observations within 
+the company each observation belongs to. For example, if a company has two acquisition announcement. 
+you will use 1 to identify the first acquisition and 2 to identify the second acquisition */
+
+drop eventcount
+sort iperm date
+by iperm date: gen set=_n
+sort iperm set
+
+tempfile crsp_data2003_2005_new
+quietly save `crsp_data2003_2005_new', replace
+
+
+/*6: Back in your original dates dataset - not the 'eventcount' one - you need to create  
+a matching set variable to identify the different event dates within each company. The final 
+step is to use the set variable to match each event 
+date with a set of stock observations.*/ 
+
+
+use `acq_dates2005', clear
+by iperm: gen set=_n
+sort iperm set
+tempfile acq_dates2005_new
+quietly save `acq_dates2005_new', replace
+
+
+use `crsp_data2003_2005_new', clear
+merge iperm set using `acq_dates2005_new'
+tab _merge
+drop _merge
+
+
+/*7: Finally, create a new variable that groups company_id and set so that you have a 
+unique identifier to use in the rest of your analysis.*/ 
+
+egen company_id = group(iperm set)
+
+*Cleaning the data and Calculating the Event and Estimation Windows for number of trading days:
+
+sort company_id date
+by company_id: gen datenum=_n
+by company_id: gen target=datenum if date==date_announce
+egen tempdate=min(target), by(company_id)
+drop target
+gen diff=datenum-tempdate
+
+by company_id: gen event_window=1 if dif>=-5 & dif<=5
+egen count_event_obs=count(event_window), by(company_id)
+
+by company_id: gen estimation_window=1 if dif<-30 & dif>=-120
+egen count_est_obs=count(estimation_window), by(company_id)
+
+replace event_window=0 if event_window==.
+replace estimation_window=0 if estimation_window==.
+
+drop if count_event_obs<10
+drop if count_est_obs<60
+
+drop if estimation_window==0 & event_window==0
+
+
+***********************************************************************************
+*Step 2: Estimating Normal Performance using a Market Model
+***********************************************************************************
+winsor retn, p(.01) gen(wretn)
+winsor vwretd, p(.01) gen(wvwretd)
+gen predicted_return=.
+egen id=group(company_id) 
+sum id, detail
+scalar id_N=r(max)
+
+local i=1
+while `i'<=id_N { 
+	display "Estimating normal performance for firm: " `i'
+	quietly reg retn vwretd if id==`i' & estimation_window==1 
+	predict p`i' if id==`i'
+	replace predicted_return=p`i' if id==`i' & event_window==1 
+	drop p`i'
+	local i=`i'+1
+}  
+
+*********************************************************************************
+*Step 3: Abnormal and Cumulative Abnormal Returns
+*********************************************************************************
+
+sort id date
+gen abnormal_return=ret-predicted_return if event_window==1
+by id: egen cumulative_abnormal_return=sum(abnormal_return)
+by id: gen cumulative_abnormal_return2=sum(abnormal_return) 
+ 
+replace cumulative_abnormal_return=. if event_window~=1
+replace cumulative_abnormal_return2=. if event_window~=1
+
+*********************************************************************************
+*Step 4: Testing for Significance
+*********************************************************************************
+
+sort id date
+by id: egen ar_sd = sd(abnormal_return)
+replace ar_sd=. if event_window~=1
+gen test =(1/11)*(cumulative_abnormal_return/ar_sd) 
+
+
+*********************************************************************************
+*Step 5: Testing Across All Events
+*********************************************************************************
+
+reg cumulative_abnormal_return if diff==0, robust
+
+
+*To generate the I can make some temporary changes to my dataset and restore it back to the original data
+
+preserve
+collapse (mean) abnormal_return, by(diff)
+twoway line abnormal_return diff if diff>=-5 & diff<=5, xlab(-5(1)5) c(l) xline(0, lp(dot)) lp(dash) scale(*.85)
+restore
+
+*To generate the I can make some temporary changes to my dataset and restore it back to the original data
+
+preserve
+collapse (mean) cumulative_abnormal_return2, by(diff)
+twoway line cumulative_abnormal_return2 diff if diff>=-5 & diff<=5, xlab(-5(1)5) c(l) xline(0, lp(dot)) lp(dash) scale(*.85)
+restore
+
+*Now bootstrap to see if there is any difference in retrun 10-day before and 10-day after the event date:
+
+capture program drop bootcumret
+program define bootcumret, rclass
+
+	reg cumulative_abnormal_return if diff==0
+	return scalar cumret=_b[_cons]
+
+end
+
+bootstrap boottest=r(cumret), reps(1000) saving(boot_diffret, replace): bootcumret
+
+save event_study_file2005, replace
+
+
+log close
+
+

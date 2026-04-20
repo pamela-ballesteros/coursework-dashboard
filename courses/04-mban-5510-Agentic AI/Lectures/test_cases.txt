@@ -1,0 +1,33 @@
+City1: New York 2026-01-31
+Central Park;Central Park, New York, NY, United States;8am-9am
+The Metropolitan Museum of Art;1000 5th Ave, New York, NY 10028, United States;10am-12pm
+Statue of Liberty;Statue of Liberty New York, NY 10004, United States;12pm-13pm
+American Museum of Natural History;200 Central Prk W, New York, NY 10024, United States;13pm-15pm
+Grand Central Terminal;89 E 42nd St, New York, NY 10017, United States;16pm-18pm
+City2: Hawaii 2026-02-01
+Hawaiʻi Volcanoes National Park;Hawaiʻi Volcanoes National Park, Hawaii, United States;9am-11am
+City3 Los Angelas 2026-02-02
+Griffith Park;Griffith Park, Los Angeles, CA 90027, United States;8am-9am
+Griffith Observatory;2800 E Observatory Rd, Los Angeles, CA 90027, United States;10am-11am
+Old Los Angeles Zoo;4801 Griffith Park Dr, Los Angeles, CA 90027, United States;12pm-13pm
+City4 Vancouver 2026-02-03
+VanDusen Botanical Garden;5251 Oak St, Vancouver, BC V6M 4H1;10am-12pm
+Vancouver Aquarium;845 Avison Way, Vancouver, BC V6G 3E2;12pm-14pm
+Science World;1455 Quebec St, Vancouver, BC V6A 3Z7;14pm-17pm
+------------------------------------------------------
+City1: New York 2026-01-31
+Central Park;8am-9am
+The Metropolitan Museum of Art;10am-12pm
+Statue of Liberty;12pm-13pm
+American Museum of Natural History;13pm-15pm
+Grand Central Terminal;16pm-18pm
+City2: Hawaii 2026-02-01
+Hawaiʻi Volcanoes National Park;9am-11am
+City3 Los Angelas 2026-02-02
+Griffith Park;8am-9am
+Griffith Observatory;10am-11am
+Old Los Angeles Zoo;12pm-13pm
+City4 Vancouver 2026-02-03
+VanDusen Botanical Garden;10am-12pm
+Vancouver Aquarium;12pm-14pm
+Science World;14pm-17pm

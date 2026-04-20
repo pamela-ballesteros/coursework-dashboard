@@ -1,0 +1,43 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+.vs/
+*.swp
+*~
+
+# Python (in case you drop in code)
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Node (unlikely but harmless)
+node_modules/
+
+# Temp / output
+*.tmp
+*.log
+~$*
+
+# Sensitive/local course files
+*.lic
+*lic*.txt
+*.sqlproj.user
+
+# Build artifacts
+bin/
+obj/
+
+# GitHub file size limit
+courses/02-mban-5570-Acctg-Finance/datasets/crsp_data2003_2006 (1).csv

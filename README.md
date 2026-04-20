@@ -61,25 +61,25 @@ coursework-dashboard/
 - Optimization techniques (Linear Programming, Integer Programming, sensitivity analysis)
 - Monte Carlo simulation and decision analysis
 
-##Data Management & Tools##
+## Data Management & Tools##
 
 - SQL and database modeling
 - Data cleaning, validation, and transformation (ETL concepts)
 - Excel (advanced), Power BI, Tableau for reporting and dashboards
 
-##Programming & Technical##
+## Programming & Technical##
 
 - Python (data analysis, ML workflows)
 - R (statistical modeling, reproducible analysis using Quarto)
 - Exposure to AI/LLM systems (LangChain, LangGraph, agent-based workflows)
 
-##Business & Financial Analytics##
+## Business & Financial Analytics##
 
 - Financial statement analysis and valuation concepts
 - KPI development and performance measurement
 - Business intelligence and reporting for decision-making
 
-##Systems & Process Thinking##
+## Systems & Process Thinking##
 
 - Data flow analysis and system architecture fundamentals
 - Business process improvement and optimization

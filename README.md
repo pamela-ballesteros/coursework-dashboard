@@ -55,7 +55,34 @@ coursework-dashboard/
 
 ## 🔖 Skills & concepts index
 
-_Coming soon — a cross-course index of methods, tools, and concepts covered, with links back to the courses and assignments that used them._
+##Analytics & Modeling##
+
+- Statistical analysis, predictive modeling, and machine learning (Random Forest, Gradient Boosting, XGBoost)
+- Optimization techniques (Linear Programming, Integer Programming, sensitivity analysis)
+- Monte Carlo simulation and decision analysis
+
+##Data Management & Tools##
+
+- SQL and database modeling
+- Data cleaning, validation, and transformation (ETL concepts)
+- Excel (advanced), Power BI, Tableau for reporting and dashboards
+
+##Programming & Technical##
+
+- Python (data analysis, ML workflows)
+- R (statistical modeling, reproducible analysis using Quarto)
+- Exposure to AI/LLM systems (LangChain, LangGraph, agent-based workflows)
+
+##Business & Financial Analytics##
+
+- Financial statement analysis and valuation concepts
+- KPI development and performance measurement
+- Business intelligence and reporting for decision-making
+
+##Systems & Process Thinking##
+
+- Data flow analysis and system architecture fundamentals
+- Business process improvement and optimization
 
 ---
 
